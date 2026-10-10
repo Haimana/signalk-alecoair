@@ -1,0 +1,46 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "ALECOAIR D13 Traditio",
+    "version": "1.0.0",
+    "description": "Control și monitorizare native Signal K pentru dezumidificatorul ALECOAIR D13 Traditio, pe LAN Tuya. Fără Node-RED."
+  },
+  "servers": [
+    { "url": "/plugins/signalk-alecoair-d13" }
+  ],
+  "paths": {
+    "/state": {
+      "get": {
+        "summary": "Starea curentă a aparatului",
+        "responses": {
+          "200": { "description": "Stare D13" }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Sănătatea conexiunii",
+        "responses": {
+          "200": { "description": "OK / deconectat" }
+        }
+      }
+    },
+    "/command": {
+      "post": {
+        "summary": "Trimite o comandă (power, mode, targetHumidity, fan, childLock, timerHours, sleep, insideDry)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Stare după comandă" },
+          "400": { "description": "Comandă invalidă" }
+        }
+      }
+    }
+  }
+}

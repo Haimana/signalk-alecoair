@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ALECOAIR D13 Traditio</title>
+  <link rel="icon" href="./icon.svg">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="app">
+    <header class="top">
+      <div class="brand">
+        <img src="./icon.svg" alt="">
+        <div>
+          <h1>ALECOAIR D13 Traditio</h1>
+          <p>13 L/zi · 170 W · Wi-Fi Tuya local · Signal K nativ</p>
+        </div>
+      </div>
+      <div class="pills">
+        <span id="connPill" class="pill">se conectează…</span>
+        <span id="modePill" class="pill">—</span>
+        <span id="simPill" class="pill">WebApp</span>
+      </div>
+    </header>
+
+    <div id="banner" class="banner"></div>
+
+    <section class="grid">
+      <article class="card gauge-wrap">
+        <div class="gauge">
+          <svg viewBox="0 0 200 200" aria-hidden="true">
+            <circle cx="100" cy="100" r="78" fill="none" stroke="rgba(127,212,255,0.12)" stroke-width="14"/>
+            <circle id="arc" cx="100" cy="100" r="78" fill="none" stroke="#3ee0c3" stroke-width="14"
+              stroke-linecap="round" stroke-dasharray="490" stroke-dashoffset="490"
+              transform="rotate(-210 100 100)"/>
+          </svg>
+          <div class="gauge-readout">
+            <strong id="rh">—</strong>
+            <span>umiditate relativă</span>
+          </div>
+        </div>
+        <div class="stats">
+          <div class="stat"><b id="watts">— W</b><small>consum</small></div>
+          <div class="stat"><b id="tank">— L</b><small>rezervor 2,3 L</small></div>
+          <div class="stat"><b id="comp">—</b><small>compresor</small></div>
+        </div>
+      </article>
+
+      <article class="card controls">
+        <div class="row">
+          <div>
+            <h2>Alimentare</h2>
+            <p id="powerLabel" style="margin:6px 0 0;color:var(--muted)">Aștept stare…</p>
+          </div>
+          <button id="powerBtn" class="power" type="button">OFF</button>
+        </div>
+
+        <div class="block">
+          <h2>Mod</h2>
+          <div class="seg" id="modeSeg">
+            <button type="button" data-mode="auto">Auto / higrostat</button>
+            <button type="button" data-mode="continuous">Continuu (CO)</button>
+            <button type="button" data-mode="sleep">Sleep</button>
+          </div>
+        </div>
+
+        <div class="block">
+          <div class="target">
+            <h2>Umiditate țintă</h2>
+            <b id="targetLabel">50%</b>
+          </div>
+          <input id="target" class="slider" type="range" min="30" max="80" step="5" value="50">
+        </div>
+
+        <div class="row">
+          <h2>Ventilator</h2>
+          <div class="seg" id="fanSeg">
+            <button type="button" data-fan="low">Treapta I</button>
+            <button type="button" data-fan="high">Treapta II</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <h2>Timer 0–24 h</h2>
+          <div class="seg">
+            <button type="button" id="timerMinus">−</button>
+            <button type="button" id="timerValue" class="active">0 h</button>
+            <button type="button" id="timerPlus">+</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <button type="button" class="ghost" id="lockBtn">Child lock</button>
+          <button type="button" class="ghost" id="dryBtn">Uscare internă</button>
+        </div>
+
+        <div class="alerts">
+          <div id="tankAlert" class="alert">
+            <span>Rezervorul de 2,3 L este plin. Aparatul s-a oprit.</span>
+            <button type="button" class="ghost" id="emptyTank">Golește (demo)</button>
+          </div>
+          <div id="defrostAlert" class="alert defrost">Dejivrare automată în curs. Compresorul este oprit temporar.</div>
+        </div>
+      </article>
+    </section>
+
+    <section class="card raw">
+      <details>
+        <summary>Datapoint-uri Tuya brute — pentru verificarea mapării D13</summary>
+        <pre id="raw">Se așteaptă date…</pre>
+      </details>
+      <p class="footer">
+        Plugin nativ Signal K: publică umiditatea, puterea, alarmele și acceptă PUT pe căile
+        <code>environment.inside.dehumidifier.*</code>. Controlul real merge pe LAN (TCP 6668),
+        fără Node-RED, MQTT sau cloud în calea de comandă. LocalKey-ul se extrage o singură dată
+        din contul Smart Life / Tuya.
+      </p>
+    </section>
+  </main>
+  <script src="./app.js"></script>
+</body>
+</html>

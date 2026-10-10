@@ -1,0 +1,38 @@
+{
+  "name": "signalk-alecoair-d13",
+  "version": "1.0.0",
+  "description": "Native Signal K plugin and WebApp for ALECOAIR D13 Traditio (13 L/day, 170 W, Wi-Fi / Tuya LAN). No Node-RED.",
+  "main": "plugin/index.js",
+  "keywords": [
+    "signalk-node-server-plugin",
+    "signalk-webapp",
+    "signalk-category-hardware",
+    "alecoair",
+    "d13",
+    "dehumidifier",
+    "tuya"
+  ],
+  "signalk-plugin-enabled-by-default": false,
+  "signalk": {
+    "displayName": "ALECOAIR D13",
+    "appIcon": "./public/icon.svg"
+  },
+  "scripts": {
+    "start": "node demo/server.js",
+    "demo": "node demo/server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "author": "Signal K ALECOAIR D13",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "tuyapi": "^7.7.1"
+  },
+  "files": [
+    "plugin",
+    "public",
+    "openapi.json"
+  ]
+}
