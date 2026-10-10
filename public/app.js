@@ -83,7 +83,8 @@ function render(next) {
   ui.target.value = String(next.targetHumidity || 50)
   ui.targetLabel.textContent = `${next.targetHumidity || 50}%`
   ui.timer.textContent = `${next.timerHours || 0} h`
-  if (next.timerRemainingMin) ui.timer.textContent = `${next.timerHours || 0} h · ${next.timerRemainingMin} min`
+  const left = Math.round(Number(next.timerRemainingMin) || 0)
+  if (left > 0) ui.timer.textContent = `${next.timerHours || 0} h · ${left} min`
 
   document.querySelectorAll('#modeSeg [data-mode]').forEach((btn) => {
     btn.classList.toggle('active', next.sleep ? btn.dataset.mode === 'sleep' : btn.dataset.mode === next.mode)
