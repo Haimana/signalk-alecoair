@@ -3,7 +3,7 @@
   "info": {
     "title": "ALECOAIR D13 Traditio",
     "version": "1.0.0",
-    "description": "Control și monitorizare native Signal K pentru dezumidificatorul ALECOAIR D13 Traditio, pe LAN Tuya. Fără Node-RED."
+    "description": "Native Signal K control and monitoring for the ALECOAIR D13 Traditio over Tuya LAN. No Node-RED."
   },
   "servers": [
     { "url": "/plugins/signalk-alecoair-d13" }
@@ -11,23 +11,55 @@
   "paths": {
     "/state": {
       "get": {
-        "summary": "Starea curentă a aparatului",
+        "summary": "Current device state",
         "responses": {
-          "200": { "description": "Stare D13" }
+          "200": { "description": "D13 state plus setup status" }
         }
       }
     },
     "/health": {
       "get": {
-        "summary": "Sănătatea conexiunii",
+        "summary": "Connection health",
         "responses": {
-          "200": { "description": "OK / deconectat" }
+          "200": { "description": "OK / disconnected" }
+        }
+      }
+    },
+    "/setup": {
+      "get": {
+        "summary": "Smart Life setup status and device list",
+        "responses": {
+          "200": { "description": "Link state, adopted device, public device list" }
+        }
+      }
+    },
+    "/smartlife/qr": {
+      "post": {
+        "summary": "Start Smart Life QR login",
+        "responses": {
+          "200": { "description": "QR payload" }
+        }
+      }
+    },
+    "/smartlife/poll": {
+      "post": {
+        "summary": "Poll QR login and persist the account plus device keys",
+        "responses": {
+          "200": { "description": "Pending, linked, or adopted" }
+        }
+      }
+    },
+    "/adopt": {
+      "post": {
+        "summary": "Use a device from the stored Smart Life list",
+        "responses": {
+          "200": { "description": "Device stored and plugin restarted" }
         }
       }
     },
     "/command": {
       "post": {
-        "summary": "Trimite o comandă (power, mode, targetHumidity, fan, childLock, timerHours, sleep, insideDry)",
+        "summary": "Send a command (power, mode, targetHumidity, fan, childLock, timerHours, sleep, insideDry)",
         "requestBody": {
           "required": true,
           "content": {
@@ -37,8 +69,8 @@
           }
         },
         "responses": {
-          "200": { "description": "Stare după comandă" },
-          "400": { "description": "Comandă invalidă" }
+          "200": { "description": "State after the command" },
+          "400": { "description": "Invalid command" }
         }
       }
     }

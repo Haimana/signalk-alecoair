@@ -18,8 +18,6 @@
     "appIcon": "./public/icon.svg"
   },
   "scripts": {
-    "start": "node demo/server.js",
-    "demo": "node demo/server.js",
     "test": "node --test"
   },
   "engines": {

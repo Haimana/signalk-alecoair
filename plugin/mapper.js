@@ -7,6 +7,7 @@ const {
   FAULT,
   mergeDps,
   clampTargetHumidity,
+  isContinuousTarget,
   humidityRatio,
   humidityPercent,
   asBool,
@@ -38,13 +39,27 @@ function emptyState() {
 }
 
 function decodeMode(raw) {
-  const v = asEnumString(raw)
-  if (v === '1') return MODE.CONTINUOUS
+  const v = String(asEnumString(raw) || '').toLowerCase()
+  if (v === '1' || v.includes('cont')) return MODE.CONTINUOUS
+  if (v.includes('sleep')) return MODE.SLEEP
   return MODE.AUTO
 }
 
 function encodeMode(mode) {
-  return mode === MODE.CONTINUOUS ? '1' : '0'
+  if (mode === MODE.SLEEP) return 'SLeeping'
+  return 'Manual'
+}
+
+function decodeTimer(raw) {
+  if (raw === undefined || raw === null) return 0
+  if (raw === 'cancel' || raw === false) return 0
+  const match = String(raw).match(/(\d+)/)
+  return match ? Number(match[1]) : 0
+}
+
+function encodeTimer(hours) {
+  const n = Math.min(D13.timerMaxHours, Math.max(0, Math.round(Number(hours) || 0)))
+  return n <= 0 ? 'cancel' : `${n}h`
 }
 
 function decodeFan(raw) {
@@ -72,24 +87,41 @@ function applyDps(state, dps, dpsMap = DEFAULT_MAP) {
   const map = dpsMap
 
   if (dps[map.power] !== undefined) next.power = asBool(dps[map.power])
-  if (dps[map.mode] !== undefined) next.mode = decodeMode(dps[map.mode])
+  if (dps[map.mode] !== undefined) {
+    next.mode = decodeMode(dps[map.mode])
+    next.sleep = next.mode === MODE.SLEEP
+  }
   if (dps[map.humidity] !== undefined) {
     const h = Number(dps[map.humidity])
     if (Number.isFinite(h)) next.humidity = h
   }
   if (dps[map.targetHumidity] !== undefined) {
-    next.targetHumidity = clampTargetHumidity(dps[map.targetHumidity])
+    if (isContinuousTarget(dps[map.targetHumidity])) {
+      next.targetHumidity = D13.continuousTarget
+      next.mode = MODE.CONTINUOUS
+      next.sleep = false
+    } else {
+      next.targetHumidity = clampTargetHumidity(dps[map.targetHumidity])
+      if (next.mode === MODE.CONTINUOUS) next.mode = MODE.AUTO
+    }
   }
-  if (dps[map.fan] !== undefined) next.fan = decodeFan(dps[map.fan])
+  if (map.fan != null && dps[map.fan] !== undefined) next.fan = decodeFan(dps[map.fan])
   if (dps[map.childLock] !== undefined) next.childLock = asBool(dps[map.childLock])
   if (dps[map.fault] !== undefined) Object.assign(next, decodeFault(dps[map.fault]))
-  if (dps[map.timer] !== undefined) next.timerHours = Number(dps[map.timer]) || 0
-  if (dps[map.timerLeft] !== undefined) next.timerRemainingMin = Number(dps[map.timerLeft]) || 0
-  if (dps[map.insideDry] !== undefined) next.insideDry = asBool(dps[map.insideDry])
+  if (dps[map.timer] !== undefined) {
+    next.timerHours = decodeTimer(dps[map.timer])
+    if (!dps[map.timerLeft]) next.timerRemainingMin = next.timerHours * 60
+  }
+  if (map.timerLeft != null && dps[map.timerLeft] !== undefined) {
+    next.timerRemainingMin = Number(dps[map.timerLeft]) || 0
+  }
+  if (map.insideDry != null && dps[map.insideDry] !== undefined) {
+    next.insideDry = asBool(dps[map.insideDry])
+  }
 
-  if (next.mode === MODE.CONTINUOUS) next.sleep = false
+  if (next.mode === MODE.CONTINUOUS && next.sleep) next.sleep = false
   if (next.fan === FAN.HIGH) next.sleep = false
-  return next
+  return refreshDerived(next)
 }
 
 const DEFAULT_MAP = mergeDps()
@@ -97,40 +129,45 @@ const DEFAULT_MAP = mergeDps()
 function commandToDps(command, dpsMap = DEFAULT_MAP) {
   const data = {}
   if (!command || typeof command !== 'object') {
-    throw new Error('Comanda trebuie să fie un obiect.')
+    throw new Error('Command must be an object.')
   }
 
   if (command.power !== undefined) data[dpsMap.power] = asBool(command.power)
   if (command.mode !== undefined) {
     const mode = String(command.mode)
-    if (mode === MODE.SLEEP) {
-      data[dpsMap.fan] = encodeFan(FAN.LOW)
-    } else if (mode === MODE.AUTO || mode === MODE.CONTINUOUS) {
-      data[dpsMap.mode] = encodeMode(mode)
+    if (mode === MODE.CONTINUOUS) {
+      data[dpsMap.targetHumidity] = D13.continuousTarget
+      data[dpsMap.mode] = encodeMode(MODE.AUTO)
+    } else if (mode === MODE.AUTO) {
+      data[dpsMap.mode] = encodeMode(MODE.AUTO)
+    } else if (mode === MODE.SLEEP) {
+      data[dpsMap.mode] = encodeMode(MODE.SLEEP)
     } else {
-      throw new Error(`Mod necunoscut: ${mode}`)
+      throw new Error(`Unknown mode: ${mode}`)
     }
   }
   if (command.targetHumidity !== undefined) {
     data[dpsMap.targetHumidity] = clampTargetHumidity(humidityPercent(command.targetHumidity) ?? command.targetHumidity)
   }
-  if (command.fan !== undefined) {
+  if (command.fan !== undefined && dpsMap.fan != null) {
     const fan = String(command.fan)
-    if (fan !== FAN.LOW && fan !== FAN.HIGH) throw new Error(`Ventilator necunoscut: ${fan}`)
+    if (fan !== FAN.LOW && fan !== FAN.HIGH) throw new Error(`Unknown fan: ${fan}`)
     data[dpsMap.fan] = encodeFan(fan)
   }
   if (command.childLock !== undefined) data[dpsMap.childLock] = asBool(command.childLock)
   if (command.timerHours !== undefined) {
-    const hours = Math.min(D13.timerMaxHours, Math.max(0, Math.round(Number(command.timerHours) || 0)))
-    data[dpsMap.timer] = String(hours)
+    data[dpsMap.timer] = encodeTimer(command.timerHours)
   }
-  if (command.insideDry !== undefined) data[dpsMap.insideDry] = asBool(command.insideDry)
-  if (command.sleep !== undefined) {
-    if (asBool(command.sleep)) data[dpsMap.fan] = encodeFan(FAN.LOW)
+  if (command.insideDry !== undefined && dpsMap.insideDry != null) {
+    data[dpsMap.insideDry] = asBool(command.insideDry)
+  }
+  if (command.sleep !== undefined && dpsMap.sleep != null) {
+    data[dpsMap.sleep] = asBool(command.sleep)
   }
 
   if (Object.keys(data).length === 0) {
-    throw new Error('Niciun câmp recunoscut în comandă.')
+    if (command.fan !== undefined || command.mode === MODE.SLEEP || command.sleep !== undefined) return data
+    throw new Error('No recognized fields in command.')
   }
   return data
 }
@@ -141,12 +178,23 @@ function applyCommandToState(state, command) {
   if (command.mode === MODE.SLEEP || command.sleep === true) {
     next.sleep = true
     next.fan = FAN.LOW
-  } else if (command.mode === MODE.AUTO || command.mode === MODE.CONTINUOUS) {
-    next.mode = command.mode
+  } else if (command.mode === MODE.CONTINUOUS) {
+    next.mode = MODE.CONTINUOUS
+    next.sleep = false
+    next.targetHumidity = D13.continuousTarget
+  } else if (command.mode === MODE.AUTO) {
+    next.mode = MODE.AUTO
     next.sleep = false
   }
   if (command.targetHumidity !== undefined) {
-    next.targetHumidity = clampTargetHumidity(humidityPercent(command.targetHumidity) ?? command.targetHumidity)
+    const raw = humidityPercent(command.targetHumidity) ?? command.targetHumidity
+    if (isContinuousTarget(raw)) {
+      next.mode = MODE.CONTINUOUS
+      next.targetHumidity = D13.continuousTarget
+    } else {
+      next.targetHumidity = clampTargetHumidity(raw)
+      if (next.mode === MODE.CONTINUOUS) next.mode = MODE.AUTO
+    }
   }
   if (command.fan !== undefined) {
     next.fan = String(command.fan)
@@ -159,6 +207,24 @@ function applyCommandToState(state, command) {
   }
   if (command.insideDry !== undefined) next.insideDry = asBool(command.insideDry)
   if (command.sleep === false) next.sleep = false
+  return refreshDerived(next)
+}
+
+function refreshDerived(state) {
+  const next = { ...state }
+  if (!next.power || next.tankFull || next.defrost) {
+    next.compressor = false
+  } else if (next.mode === MODE.CONTINUOUS) {
+    next.compressor = true
+  } else {
+    next.compressor = Number(next.humidity) > Number(next.targetHumidity) + 1
+  }
+  if (!next.power) next.powerWatts = 0
+  else if (next.tankFull) next.powerWatts = 2
+  else if (next.defrost) next.powerWatts = 28
+  else if (next.compressor) next.powerWatts = next.sleep ? 145 : D13.ratedWatts
+  else next.powerWatts = D13.idleWatts
+  next.updatedAt = Date.now()
   return next
 }
 
@@ -226,19 +292,19 @@ function metadata(options = {}) {
   const prefix = options.pathPrefix || 'environment.inside.dehumidifier'
   const paths = skPaths(prefix)
   const meta = [
-    { path: paths.humidity, value: { units: 'ratio', description: 'Umiditate relativă măsurată de D13', displayName: 'Umiditate cabină' } },
-    { path: paths.targetHumidity, value: { units: 'ratio', description: 'Umiditate țintă higrostat (30–80%)', displayName: 'Umiditate țintă' } },
-    { path: paths.power, value: { units: 'bool', description: 'Alimentare dezumidificator', displayName: 'Pornit', supportsPut: true } },
-    { path: paths.mode, value: { description: 'auto | continuous | sleep', displayName: 'Mod', supportsPut: true } },
-    { path: paths.fan, value: { description: 'low | high', displayName: 'Ventilator', supportsPut: true } },
-    { path: paths.targetHumidity, value: { units: 'ratio', supportsPut: true, description: 'Umiditate țintă' } },
+    { path: paths.humidity, value: { units: 'ratio', description: 'Relative humidity measured by the D13', displayName: 'Cabin humidity' } },
+    { path: paths.targetHumidity, value: { units: 'ratio', description: 'Hygrostat target (30–80%)', displayName: 'Target humidity' } },
+    { path: paths.power, value: { units: 'bool', description: 'Dehumidifier power', displayName: 'Power', supportsPut: true } },
+    { path: paths.mode, value: { description: 'auto | continuous | sleep', displayName: 'Mode', supportsPut: true } },
+    { path: paths.fan, value: { description: 'low | high', displayName: 'Fan', supportsPut: true } },
+    { path: paths.targetHumidity, value: { units: 'ratio', supportsPut: true, description: 'Target humidity' } },
     { path: paths.childLock, value: { units: 'bool', supportsPut: true, displayName: 'Child lock' } },
     { path: paths.timerHours, value: { units: 'h', supportsPut: true, displayName: 'Timer' } },
     { path: paths.sleep, value: { units: 'bool', supportsPut: true, displayName: 'Sleep' } },
-    { path: paths.insideDry, value: { units: 'bool', supportsPut: true, displayName: 'Uscare internă' } },
-    { path: paths.tankFull, value: { units: 'bool', description: 'Rezervor 2.3 L plin' } },
-    { path: paths.defrost, value: { units: 'bool', description: 'Dejivrare automată' } },
-    { path: paths.powerWatts, value: { units: 'W', description: 'Putere estimată (170 W la 30°C / 80% RH)' } },
+    { path: paths.insideDry, value: { units: 'bool', supportsPut: true, displayName: 'Inside dry' } },
+    { path: paths.tankFull, value: { units: 'bool', description: '2.3 L tank is full' } },
+    { path: paths.defrost, value: { units: 'bool', description: 'Automatic defrost' } },
+    { path: paths.powerWatts, value: { units: 'W', description: 'Estimated power (170 W at 30°C / 80% RH)' } },
     { path: paths.timerRemaining, value: { units: 's' } },
     { path: paths.tankLiters, value: { units: 'L' } }
   ]
@@ -253,13 +319,13 @@ function notifications(state, options = {}) {
       value: {
         state: 'alert',
         method: ['visual', 'sound'],
-        message: 'ALECOAIR D13: rezervorul de 2,3 L este plin. Golește-l ca aparatul să repornească.'
+        message: 'ALECOAIR D13: the 2.3 L tank is full. Empty it so the unit can restart.'
       }
     }]
   }
   return [{
     path,
-    value: { state: 'normal', message: 'Rezervor OK' }
+    value: { state: 'normal', message: 'Tank OK' }
   }]
 }
 
@@ -289,6 +355,7 @@ function publicState(state) {
     ratedWatts: D13.ratedWatts,
     capacityLitersPerDay: D13.capacityLitersPerDay,
     lastError: state.lastError || null,
+    updatedAt: state.updatedAt || null,
     rawDps: state.rawDps || {}
   }
 }
@@ -300,9 +367,12 @@ module.exports = {
   applyCommandToState,
   decodeMode,
   encodeMode,
+  decodeTimer,
+  encodeTimer,
   decodeFan,
   encodeFan,
   decodeFault,
+  refreshDerived,
   stateToValues,
   metadata,
   notifications,

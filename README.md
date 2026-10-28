@@ -1,49 +1,38 @@
 # signalk-alecoair-d13
 
-Plugin **nativ Signal K** + WebApp pentru [ALECOAIR D13 Traditio](https://alecoair.ro/dezumidificator-alecoair-d13-traditio-13lzi) (13 L/zi, 170 W, Wi-Fi 2.4 GHz).
+Native Signal K plugin and WebApp for the [ALECOAIR D13 Traditio](https://alecoair.ro/dezumidificator-alecoair-d13-traditio-13lzi) (13 L/day, 170 W, 2.4 GHz Wi-Fi).
 
-Nu folosește Node-RED, Home Assistant, MQTT sau cloud în calea de control. Pluginul vorbește protocolul Tuya **local** (TCP 6668) și publică starea în arborele Signal K. WebApp-ul stă în `public/` și este montat de serverul Signal K.
+Control stays on the boat LAN (Tuya TCP 6668). No Node-RED, Home Assistant, MQTT, or cloud in the command path.
 
-## De ce merge nativ
+## Setup
 
-D13 Traditio (modelele cu Wi-Fi după 26.11.2021) este compatibil **AlecoAir / Smart Life / Tuya Smart**. Familia de dezumidificatoare AlecoAir cu compresor folosește aceleași datapoint-uri Tuya ca D12/D16 HOME și Shinco 30D:
+1. Install and enable **ALECOAIR D13 Traditio** in Signal K Plugin Config.
+2. Open the WebApp: `http://<signalk>:3000/signalk-alecoair-d13`
+3. In Smart Life: **Me** → gear → **Account and Security** → copy **User Code**.
+4. Generate the QR in the WebApp.
+5. Stay on **Me** and tap the **scan icon** next to the gear. Do **not** use **+** / Add device.
+6. Confirm **login**. The plugin stores the device key and connects locally.
 
-| DP | Rol | Valori |
-| --- | --- | --- |
-| 1 | Pornit / oprit | `true` / `false` |
-| 2 | Mod | `"0"` auto (higrostat), `"1"` continuu (CO / rufe) |
-| 3 | Umiditate măsurată | % RH |
-| 4 | Umiditate țintă | 30–80, pas 5 |
-| 6 | Ventilator | `"0"` treapta II, `"1"` treapta I |
-| 7 | Child lock | boolean |
-| 11 | Defecte | bit 4 = dejivrare, bit 8 = rezervor plin |
-| 12 | Timer | 0–24 h |
-| 13 | Timp rămas | minute |
-| 101 | Uscare internă (Fan Stop) | boolean |
+After that, internet is not required for control.
 
-Sleep pe panoul D13 este ventilator mic + display stins; pluginul îl expune ca comandă de conveniență (`mode: sleep` / `sleep: true`).
+## Signal K paths
 
-Manualul confirmă: implicit Manual + higrostat, CO = funcționare continuă, prag de repornire **țintă + 1% RH**, rezervor 2,3 L, 145 / 170 / 195 W în funcție de sarcină.
+Default prefix: `environment.inside.dehumidifier`
 
-## Ce publică în Signal K
-
-Prefix implicit: `environment.inside.dehumidifier`
-
-- `environment.inside.humidity` — raport 0–1 (opțional)
+- `environment.inside.humidity` — ratio 0–1 (optional)
 - `.power`, `.mode`, `.fanSpeed`, `.targetHumidity`, `.sleep`, `.childLock`, `.insideDry` — **PUT**
 - `.humidity`, `.tankFull`, `.defrost`, `.compressor`, `.electricalPower`, `.timerRemaining`
-- `electrical.loads.alecoairD13.power` — wați estimați
+- `electrical.loads.alecoairD13.power` — estimated watts
 - `notifications.environment.inside.dehumidifier.tankFull`
 
-## Instalare pe un server Signal K
+## Install
 
 ```bash
 cd ~/.signalk
-npm install /cale/către/signalk-alecoair-d13
-# sau, după publicare: npm install signalk-alecoair-d13
+npm install /path/to/signalk-alecoair-d13
 ```
 
-Alternativ, din folderul pluginului:
+Or from the plugin folder:
 
 ```bash
 npm install
@@ -51,40 +40,39 @@ npm link
 cd ~/.signalk && npm link signalk-alecoair-d13
 ```
 
-Repornește Signal K. Activează **ALECOAIR D13 Traditio** din Plugin Config.
+Restart Signal K. Enable the plugin. Smart Life login also needs Python 3 and `requirements.txt` in a plugin `.venv`:
 
-WebApp: `http://<signalk>:3000/signalk-alecoair-d13`  
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
 API: `http://<signalk>:3000/plugins/signalk-alecoair-d13/state`
-
-## Cheile Tuya (o singură dată)
-
-Controlul local cere `deviceId` + `localKey`. Nu sunt în rețea; le iei o dată din Tuya / Smart Life:
-
-```bash
-npx @tuyapi/cli wizard
-```
-
-sau `python3 -m tinytuya wizard`. Lege contul Smart Life (nu neapărat aplicația AlecoAir) de un proiect gratuit pe [iot.tuya.com](https://iot.tuya.com). După ce cheia e în config, internetul nu mai e necesar.
-
-IP-ul e opțional dacă scanarea UDP găsește aparatul. Protocol implicit: **3.3** (D12/D16 HOME). Dacă D13-ul tău e 3.4, schimbă versiunea în config.
-
-Pornește cu **Mod simulator** bifat ca să verifici WebApp-ul fără hardware. Debifează-l când pui ID-ul și localKey-ul reale.
-
-## Previzualizare fără Signal K
-
-```bash
-npm install
-npm start
-```
-
-Deschide `http://127.0.0.1:43147`. Simulatorul modelează higrostatul, extracția 13 L/zi, rezervorul de 2,3 L și cei 170 W.
 
 ```bash
 npm test
 ```
 
-## Limitări oneste
+## Tuya datapoints
 
-Maparea DP e cea documentată pentru familia AlecoAir/Shinco. D13 Traditio nu are încă un product_id publicat separat. WebApp-ul arată DPS-urile brute; dacă un buton nu mișcă aparatul, ajustează maparea după ce compari valorile din aplicația Tuya. Sleep nu e un DP oficial — e ventilator pe treapta I.
+D13 Traditio Wi-Fi talks Tuya protocol **3.5** on LAN. Cloud often returns a WAN IP; the plugin keeps only RFC1918 addresses.
 
-`signalk-tuya` existent acoperă doar prize, nu dezumidificatoare, și apelează Python. Acest plugin rămâne Node.js în procesul Signal K.
+| DP | Role | Values |
+| --- | --- | --- |
+| 1 | Power | `true` / `false` |
+| 2 | Target humidity | 30–80, step 5 |
+| 5 | Mode | `Manual` (hygrostat), `Continuous`, `Sleep` |
+| 6 | Measured humidity | % RH |
+| 16 | Child lock | boolean |
+| 17 | Timer | `cancel`, `1h`…`24h` |
+| 19 | Faults | bit 4 = defrost, bit 8 = tank full |
+
+Fan speed is on the panel but not exposed on this firmware's LAN schema. Sleep is mode `Sleep`.
+
+Manual defaults: Manual + hygrostat, CO = continuous, restart threshold **target + 1% RH**, 2.3 L tank, 145 / 170 / 195 W.
+
+## Limits
+
+The DP map is the documented AlecoAir/Shinco family. The WebApp shows raw DPS values if a button does not move the unit. Sleep is not an official DP.
+
+Existing `signalk-tuya` covers sockets, not dehumidifiers. This plugin stays in the Signal K Node.js process for LAN control. Smart Life is used once to fetch the local key.

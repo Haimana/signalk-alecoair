@@ -47,13 +47,19 @@ test('runtime simulator accepts commands and stays connected', async () => {
   assert.equal(next.power, true)
   assert.equal(next.targetHumidity, 45)
   assert.equal(next.connected, true)
+  assert.equal(next.controls.fan, false)
   await runtime.stop()
 })
 
 test('LAN runtime without credentials reports a clear error', async () => {
-  const runtime = new DeviceRuntime({ simulate: false, deviceId: '', localKey: '' })
+  const runtime = new DeviceRuntime({
+    simulate: false,
+    deviceId: '',
+    localKey: '',
+    autoScan: true
+  }, { discover: async () => [] })
   await runtime.start()
   assert.equal(runtime.getPublicState().connected, false)
-  assert.match(runtime.getPublicState().lastError || '', /localKey|deviceId|Lipsesc/)
+  assert.match(runtime.getPublicState().lastError || '', /Smart Life|Tuya|WebApp/)
   await runtime.stop()
 })

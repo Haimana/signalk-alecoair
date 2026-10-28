@@ -14,28 +14,24 @@ const D13 = {
   humidityMin: 30,
   humidityMax: 80,
   humidityStep: 5,
+  continuousTarget: 25,
   timerMaxHours: 24,
-  protocolDefault: '3.3'
+  protocolDefault: '3.5',
+  protocolVersions: ['3.5', '3.4', '3.3']
 }
 
 /**
- * Tuya datapoints shared by AlecoAir compressor dehumidifiers (D12/D16 HOME,
- * Shinco 30D family). D13 Traditio Wi-Fi uses the same Smart Life / Tuya
- * category `cs`. Sleep on the panel is low fan + dimmed display, not a
- * separate documented DP — we treat it as a convenience command.
+ * Live D13 Traditio LAN map (Tuya 3.5). Older Shinco-style IDs wrote fan
+ * onto the humidity DP and never completed a 3.5 session.
  */
 const DEFAULT_DPS = {
   power: 1,
-  mode: 2,
-  humidity: 3,
-  targetHumidity: 4,
-  anion: 5,
-  fan: 6,
-  childLock: 7,
-  fault: 11,
-  timer: 12,
-  timerLeft: 13,
-  insideDry: 101
+  targetHumidity: 2,
+  mode: 5,
+  humidity: 6,
+  childLock: 16,
+  timer: 17,
+  fault: 19
 }
 
 const MODE = {
@@ -58,9 +54,29 @@ function mergeDps(overrides = {}) {
   return { ...DEFAULT_DPS, ...overrides }
 }
 
+function availableControls(dpsMap = DEFAULT_DPS) {
+  return {
+    power: dpsMap.power != null,
+    mode: dpsMap.mode != null,
+    targetHumidity: dpsMap.targetHumidity != null,
+    fan: dpsMap.fan != null,
+    childLock: dpsMap.childLock != null,
+    timer: dpsMap.timer != null,
+    insideDry: dpsMap.insideDry != null,
+    sleep: dpsMap.sleep != null || dpsMap.mode != null
+  }
+}
+
+function isContinuousTarget(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return false
+  return n < D13.humidityMin || n > D13.humidityMax
+}
+
 function clampTargetHumidity(value) {
   const n = Number(value)
   if (!Number.isFinite(n)) return D13.humidityMin
+  if (isContinuousTarget(n)) return D13.continuousTarget
   const stepped = Math.round(n / D13.humidityStep) * D13.humidityStep
   return Math.min(D13.humidityMax, Math.max(D13.humidityMin, stepped))
 }
@@ -95,6 +111,8 @@ module.exports = {
   FAN,
   FAULT,
   mergeDps,
+  availableControls,
+  isContinuousTarget,
   clampTargetHumidity,
   humidityRatio,
   humidityPercent,
