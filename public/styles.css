@@ -115,7 +115,6 @@ body {
 .banner.show { display: block; }
 .banner.error { background: rgba(255, 107, 107, 0.1); border-color: rgba(255, 107, 107, 0.3); color: #ffc1c1; }
 
-.raw { margin-top: 16px; }
 details { border-top: 1px solid var(--line); padding-top: 12px; color: var(--muted); }
 pre {
   overflow: auto; background: #070d14; border-radius: 12px; padding: 12px;

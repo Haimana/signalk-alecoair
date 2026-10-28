@@ -20,16 +20,70 @@ const ui = {
   lock: $('lockBtn'),
   dry: $('dryBtn'),
   tankAlert: $('tankAlert'),
-  defrostAlert: $('defrostAlert'),
-  raw: $('raw')
+  defrostAlert: $('defrostAlert')
 }
 
 let apiBase = '/plugins/signalk-alecoair-d13'
 let state = null
 let busy = false
+let pendingCommand = null
+let hold = null
 let pollTimer = null
 let picking = false
 let qrWaiting = false
+
+function beginHold(body) {
+  hold = {
+    until: Date.now() + 8000,
+    fields: { ...(hold && hold.fields), ...body }
+  }
+}
+
+function clearHoldField(key, value) {
+  if (!hold || !hold.fields || hold.fields[key] === undefined) return
+  if (value !== undefined && Number(hold.fields[key]) !== Number(value) && hold.fields[key] !== value) return
+  delete hold.fields[key]
+  if (!Object.keys(hold.fields).length) hold = null
+}
+
+function applyHold(next) {
+  if (!hold || Date.now() > hold.until) {
+    hold = null
+    return next
+  }
+  const out = { ...next }
+  const f = hold.fields
+  if (f.targetHumidity !== undefined) {
+    if (Number(out.targetHumidity) === Number(f.targetHumidity)) clearHoldField('targetHumidity', f.targetHumidity)
+    else {
+      out.targetHumidity = Number(f.targetHumidity)
+      if (out.mode === 'continuous') out.mode = 'auto'
+      out.sleep = false
+    }
+  }
+  if (f.power !== undefined) {
+    if (Boolean(out.power) === Boolean(f.power)) clearHoldField('power', f.power)
+    else out.power = Boolean(f.power)
+  }
+  if (f.mode !== undefined) {
+    const wantSleep = f.mode === 'sleep'
+    const matched = wantSleep ? out.sleep : (!out.sleep && out.mode === f.mode)
+    if (matched) clearHoldField('mode', f.mode)
+    else {
+      out.mode = f.mode === 'sleep' ? 'auto' : f.mode
+      out.sleep = wantSleep
+    }
+  }
+  if (f.childLock !== undefined) {
+    if (Boolean(out.childLock) === Boolean(f.childLock)) clearHoldField('childLock', f.childLock)
+    else out.childLock = Boolean(f.childLock)
+  }
+  if (f.timerHours !== undefined) {
+    if (Number(out.timerHours) === Number(f.timerHours)) clearHoldField('timerHours', f.timerHours)
+    else out.timerHours = Number(f.timerHours)
+  }
+  return out
+}
 
 async function apiFetch(path, options = {}) {
   return fetch(path, { credentials: 'include', cache: 'no-store', ...options })
@@ -126,6 +180,7 @@ function renderDevices(devices) {
 }
 
 function render(next) {
+  next = applyHold(next)
   state = next
   const connected = Boolean(next.connected)
   ui.conn.textContent = connected ? 'connected' : 'disconnected'
@@ -151,12 +206,15 @@ function render(next) {
     ? (next.compressor ? 'Compressor running, 13 L/day' : 'On, waiting for the hygrostat')
     : 'Off'
 
-  if (next.mode === 'continuous') {
-    ui.target.value = '30'
+  const scrubbing = document.activeElement === ui.target
+  if (next.mode === 'continuous' && !(hold && hold.fields && hold.fields.targetHumidity !== undefined)) {
+    if (!scrubbing) ui.target.value = '30'
     ui.targetLabel.textContent = 'CO'
-  } else {
+  } else if (!scrubbing) {
     ui.target.value = String(next.targetHumidity || 50)
     ui.targetLabel.textContent = `${next.targetHumidity || 50}%`
+  } else {
+    ui.targetLabel.textContent = `${ui.target.value}%`
   }
   ui.timer.textContent = `${next.timerHours || 0} h`
   const left = Math.round(Number(next.timerRemainingMin) || 0)
@@ -180,7 +238,6 @@ function render(next) {
   ui.dry.textContent = next.insideDry ? 'Inside dry ON' : 'Inside dry'
   ui.tankAlert.classList.toggle('show', Boolean(next.tankFull))
   ui.defrostAlert.classList.toggle('show', Boolean(next.defrost))
-  ui.raw.textContent = JSON.stringify(next.rawDps && Object.keys(next.rawDps).length ? next.rawDps : next, null, 2)
 
   if (next.setup) renderSetup(picking ? { ...next.setup, forcePick: true } : next.setup)
 
@@ -217,18 +274,29 @@ function authError(res, data) {
 }
 
 async function command(body) {
-  if (busy) return
+  beginHold(body)
+  if (state) render({ ...state, ...body })
+  if (busy) {
+    pendingCommand = { ...(pendingCommand || {}), ...body }
+    return
+  }
   busy = true
   try {
-    const res = await apiFetch(`${apiBase}/command`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    })
-    const data = await readJson(res)
-    if (!res.ok) throw new Error(authError(res, data))
-    render(data)
+    let payload = body
+    while (payload) {
+      pendingCommand = null
+      const res = await apiFetch(`${apiBase}/command`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      const data = await readJson(res)
+      if (!res.ok) throw new Error(authError(res, data))
+      render(data)
+      payload = pendingCommand
+    }
   } catch (err) {
+    hold = null
     setBanner(err.message, 'error')
   } finally {
     busy = false
@@ -367,10 +435,13 @@ function bind() {
       command({ fan: btn.dataset.fan })
     })
   })
-  ui.target.addEventListener('change', () => command({ targetHumidity: Number(ui.target.value) }))
+  ui.target.addEventListener('pointerdown', () => beginHold({ targetHumidity: Number(ui.target.value) }))
   ui.target.addEventListener('input', () => {
-    ui.targetLabel.textContent = `${ui.target.value}%`
+    const targetHumidity = Number(ui.target.value)
+    ui.targetLabel.textContent = `${targetHumidity}%`
+    beginHold({ targetHumidity })
   })
+  ui.target.addEventListener('change', () => command({ targetHumidity: Number(ui.target.value) }))
   $('timerMinus').addEventListener('click', () => command({ timerHours: Math.max(0, (state?.timerHours || 0) - 1) }))
   $('timerPlus').addEventListener('click', () => command({ timerHours: Math.min(24, (state?.timerHours || 0) + 1) }))
   ui.lock.addEventListener('click', () => command({ childLock: !(state && state.childLock) }))

@@ -60,19 +60,17 @@ D13 Traditio Wi-Fi talks Tuya protocol **3.5** on LAN. Cloud often returns a WAN
 | DP | Role | Values |
 | --- | --- | --- |
 | 1 | Power | `true` / `false` |
-| 2 | Target humidity | 30–80, step 5 |
-| 5 | Mode | `Manual` (hygrostat), `Continuous`, `Sleep` |
+| 2 | Target humidity | 30–80 step 5; Continuous uses `25` (CO) |
+| 5 | Mode | `Manual` (hygrostat/CO), `SLeeping` |
 | 6 | Measured humidity | % RH |
 | 16 | Child lock | boolean |
 | 17 | Timer | `cancel`, `1h`…`24h` |
 | 19 | Faults | bit 4 = defrost, bit 8 = tank full |
 
-Fan speed is on the panel but not exposed on this firmware's LAN schema. Sleep is mode `Sleep`.
+Live LAN schema on D13 Traditio exposes only these seven DPs. Fan speed and inside-dry are not on the wire.
 
-Manual defaults: Manual + hygrostat, CO = continuous, restart threshold **target + 1% RH**, 2.3 L tank, 145 / 170 / 195 W.
+Manual defaults: Manual + hygrostat, CO = continuous via target `25`, restart threshold **target + 1% RH**, 2.3 L tank, 145 / 170 / 195 W.
 
 ## Limits
 
-The DP map is the documented AlecoAir/Shinco family. The WebApp shows raw DPS values if a button does not move the unit. Sleep is not an official DP.
-
-Existing `signalk-tuya` covers sockets, not dehumidifiers. This plugin stays in the Signal K Node.js process for LAN control. Smart Life is used once to fetch the local key.
+Existing `signalk-tuya` covers sockets, not dehumidifiers. This plugin stays in the Signal K Node.js process for LAN control. AlecoAir OEM login is used once to fetch the local key.

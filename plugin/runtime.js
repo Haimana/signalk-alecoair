@@ -36,6 +36,35 @@ class DeviceRuntime extends EventEmitter {
     if (this.options.ip && !isLanIp(this.options.ip)) this.options.ip = ''
     this.discovered = []
     this.lastScanAt = null
+    this.commandEcho = null
+  }
+
+  rememberCommand(command, dps) {
+    this.commandEcho = {
+      until: Date.now() + 10000,
+      command: { ...command },
+      dps: { ...dps }
+    }
+  }
+
+  applyPolledDps(dps) {
+    let incoming = { ...dps }
+    const echo = this.commandEcho
+    if (echo && Date.now() <= echo.until) {
+      let pending = false
+      for (const [key, expected] of Object.entries(echo.dps || {})) {
+        if (incoming[key] === undefined || incoming[key] !== expected) {
+          delete incoming[key]
+          pending = true
+        }
+      }
+      let next = applyDps({ ...this.state, connected: true, lastError: null }, incoming, this.dpsMap)
+      if (pending) next = applyCommandToState(next, echo.command)
+      else this.commandEcho = null
+      return next
+    }
+    this.commandEcho = null
+    return applyDps({ ...this.state, connected: true, lastError: null }, incoming, this.dpsMap)
   }
 
   getPublicState() {
@@ -145,7 +174,7 @@ class DeviceRuntime extends EventEmitter {
     try {
       const dps = await this.device.get()
       this.pollFails = 0
-      this.state = applyDps({ ...this.state, connected: true, lastError: null }, dps, this.dpsMap)
+      this.state = this.applyPolledDps(dps)
       this.emit('state', this.getPublicState())
     } catch (err) {
       this.pollFails += 1
@@ -173,16 +202,19 @@ class DeviceRuntime extends EventEmitter {
       nextCommand.targetHumidity = this.lastHygrostat || 50
     }
     const dps = commandToDps(nextCommand, this.dpsMap)
-    if (Object.keys(dps).length) await this.device.setDps(dps)
-    this.state = applyCommandToState({ ...this.state, connected: true }, nextCommand)
+    if (Object.keys(dps).length) {
+      await this.device.setDps(dps)
+      this.rememberCommand(nextCommand, dps)
+    }
+    this.state = applyCommandToState({ ...this.state, connected: true, lastError: null }, nextCommand)
     this.emit('state', this.getPublicState())
-    setTimeout(() => { this.poll().catch(() => {}) }, 800)
+    setTimeout(() => { this.poll().catch(() => {}) }, 1200)
     return this.getPublicState()
   }
 
   bindDevice() {
     this.device.onData((dps) => {
-      this.state = applyDps({ ...this.state, connected: true, lastError: null }, dps, this.dpsMap)
+      this.state = this.applyPolledDps(dps)
       this.emit('state', this.getPublicState())
     })
     this.device.onError((err) => {
