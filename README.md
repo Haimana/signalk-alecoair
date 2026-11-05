@@ -65,7 +65,7 @@ D13 Traditio Wi-Fi talks Tuya protocol **3.5** on LAN. Cloud often returns a WAN
 | 6 | Measured humidity | % RH |
 | 16 | Child lock | boolean |
 | 17 | Timer | `cancel`, `1h`…`24h` |
-| 19 | Faults | bit 4 = defrost, bit 8 = tank full |
+| 19 | Faults | bit 4 = tank full, bit 8 = defrost |
 
 Live LAN schema on D13 Traditio exposes only these seven DPs. Fan speed and inside-dry are not on the wire.
 

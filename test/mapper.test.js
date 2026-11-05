@@ -35,11 +35,16 @@ test('decodes live D13 Traditio DPS into state', () => {
   assert.equal(state.mode, MODE.AUTO)
   assert.equal(state.humidity, 67)
   assert.equal(state.targetHumidity, 50)
-  assert.equal(state.tankFull, true)
-  assert.equal(state.defrost, false)
+  assert.equal(state.tankFull, false)
+  assert.equal(state.defrost, true)
   assert.equal(state.timerHours, 2)
   assert.equal(state.compressor, false)
-  assert.equal(state.powerWatts, 2)
+  assert.equal(state.powerWatts, 28)
+
+  const stateTank = applyDps(emptyState(), { 1: true, 19: 4 })
+  assert.equal(stateTank.tankFull, true)
+  assert.equal(stateTank.defrost, false)
+  assert.equal(stateTank.powerWatts, 2)
 })
 
 test('derives compressor and watts from humidity vs target', () => {

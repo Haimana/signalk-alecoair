@@ -46,8 +46,8 @@ const FAN = {
 }
 
 const FAULT = {
-  DEFROST: 4,
-  TANK_FULL: 8
+  TANK_FULL: 4,
+  DEFROST: 8
 }
 
 function mergeDps(overrides = {}) {
