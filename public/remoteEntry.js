@@ -428,7 +428,7 @@
         api('/setup/login', 'POST', login).then(function (s) {
           statusState[1](s)
           loginState[1](Object.assign({}, login, { password: '' }))
-          note('success', 'Signed in. ' + ((s.account && s.account.devices) || []).length + ' device(s) on this account. Add the dehumidifiers below, then Save.')
+          note('success', 'Signed in. ' + ((s.account && s.account.devices) || []).length + ' device(s) on this account. Click Add for each dehumidifier, optionally Scan LAN, then Save.')
           if (draft.account.region !== login.region) setDraft(Object.assign({}, draft, { account: { region: login.region } }))
         }).catch(function (err) { note('danger', err.message) }).then(function () { busyState[1]('') })
       }
@@ -509,8 +509,16 @@
       var configuredIds = {}
       draft.devices.forEach(function (d) { if (d.tuyaId) configuredIds[d.tuyaId] = d.key })
       var disc = status.discovery || {}
+      // Login first. Until the account is linked (signed in now or earlier), or
+      // the draft already holds a real (non-simulator) unit whose key is on the
+      // server, show only the sign-in form. The account device table, LAN scan
+      // and device list come after: a scan only finds IPs, while control needs
+      // each unit's local key, which only the account sign-in provides.
+      var hasRealDevice = draft.devices.some(function (d) { return !d.simulate })
+      var setupOpen = Boolean(account.linked) || hasRealDevice
+      var showSave = setupOpen || dirtyState[0] || draft.devices.length > 0
 
-      return h('div', { className: 'alecoair-config' },
+      return h('div', { className: 'alecoair-config', 'data-aa-stage': setupOpen ? 'setup' : 'login' },
         h('p', { className: 'small text-muted' },
           'All AlecoAir setup happens here. The WebApp at ', h('a', { href: status.webappPath, target: '_blank', rel: 'noopener' }, status.webappPath),
           ' only operates the units.'),
@@ -525,7 +533,7 @@
         },
         h('p', { className: 'small' }, account.linked
           ? 'Signed in via ' + (account.source || 'AlecoAir') + ' (region ' + (account.region || '—') + ', ' + fmtTime(account.linkedAt) + '). Sign in again to refresh local keys after re-pairing a unit.'
-          : 'Sign in once with the email or phone and password of the AlecoAir app where the units already appear. The password is not stored; only each device\u2019s local key is kept on this server. Control then stays on the LAN.'),
+          : 'Sign in with the email or phone and password of the AlecoAir app where the units already appear. This is needed once, to fetch each unit\u2019s local key: a LAN scan can find a unit\u2019s IP, but without that key it cannot read or control the unit. The password is not stored; only the local keys are kept on this server, and control then stays on the LAN.'),
         account.linked ? h('p', { className: 'small text-muted' },
           account.user
             ? h('span', null, 'Linked account: ', h('b', null, account.user), '. ')
@@ -538,7 +546,7 @@
           h(Field, { label: 'Country code (phone)' }, h(TextInput, { value: login.countryCode, onChange: function (v) { loginState[1](Object.assign({}, login, { countryCode: v })) } })),
           h('div', { className: 'aa-actions mb-2' },
             h('button', { type: 'submit', className: 'btn btn-sm btn-primary w-100', disabled: busyState[0] === 'login' || !login.account || !login.password }, busyState[0] === 'login' ? 'Signing in…' : 'Sign in'))),
-        cloud.length ? h('div', { className: 'table-responsive mt-2' }, h('table', { className: 'table table-sm small mb-0' },
+        setupOpen && cloud.length ? h('div', { className: 'table-responsive mt-2' }, h('table', { className: 'table table-sm small mb-0' },
           h('thead', null, h('tr', null, h('th', null, 'Device'), h('th', null, 'Product'), h('th', null, 'Profile'), h('th', null, 'Key'), h('th', null, ''))),
           h('tbody', null, cloud.map(function (c) {
             var key = configuredIds[c.id]
@@ -556,11 +564,11 @@
                 : h('button', { type: 'button', className: 'btn btn-sm btn-outline-primary', disabled: !c.hasKey, onClick: function () { addCloud(c) } }, 'Add')))
           })))) : null),
 
-        h(Section, {
+        setupOpen ? h(Section, {
           title: 'LAN discovery',
           actions: h('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary', disabled: busyState[0] === 'scan' || disc.scanning, onClick: doScan }, busyState[0] === 'scan' || disc.scanning ? 'Scanning…' : 'Scan LAN')
         },
-        h('p', { className: 'small mb-2' }, 'One shared scan (Tuya UDP 6666/6667 plus a TCP 6668 sweep) serves every device without a fixed IP. Last scan: ' + fmtTime(disc.lastScanAt) + (disc.lastError ? ' · ' + disc.lastError : '')),
+        h('p', { className: 'small mb-2' }, 'Optional: finds the units\u2019 LAN IPs. Adding from the account does not need a scan, and a scan alone cannot control a unit. One shared scan (Tuya UDP 6666/6667 plus a TCP 6668 sweep) serves every device without a fixed IP. Last scan: ' + fmtTime(disc.lastScanAt) + (disc.lastError ? ' · ' + disc.lastError : '')),
         h(Field, { label: 'Extra subnets to sweep (comma separated, e.g. 172.22.22.0/24; empty = local /24s)', className: 'col-12' },
           h(TextInput, {
             value: (draft.discovery.subnets || []).join(', '),
@@ -577,13 +585,15 @@
               h('td', null, x.id && x.version ? x.version : (x.knownVersion ? h('span', null, x.knownVersion, fromConfig) : '—')),
               h('td', null, x.id ? (x.tcp ? 'UDP + TCP' : 'UDP') : 'TCP 6668 only'),
               h('td', null, key ? h('span', null, h('code', null, key), x.matchedBy === 'ip' ? h('div', { className: 'text-muted' }, 'matched by IP') : null) : '—'))
-          })))) : null),
+          })))) : null) : null,
 
         h(Section, {
           title: 'Dehumidifiers',
           actions: h('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary', onClick: addSimulator }, 'Add simulator')
         },
-        draft.devices.length === 0 ? h('p', { className: 'small mb-0' }, 'No device yet. Sign in above and add one.') : null,
+        draft.devices.length === 0 ? h('p', { className: 'small mb-0' }, setupOpen
+          ? 'No device yet. Click Add in the account table above.'
+          : 'No device yet. Sign in above to list and add your dehumidifiers, or add a simulator to try the plugin without hardware.') : null,
         draft.devices.map(function (d, i) {
           return h(DeviceCard, {
             key: i + ':' + (d.tuyaId || d.key),
@@ -595,16 +605,16 @@
           })
         })),
 
-        h('div', { className: 'd-flex gap-2 align-items-center mb-3' },
+        showSave ? h('div', { className: 'd-flex gap-2 align-items-center mb-3' },
           h('button', { type: 'button', className: 'btn btn-primary', disabled: !dirtyState[0], onClick: doSave }, 'Save configuration'),
-          dirtyState[0] ? h('span', { className: 'small text-warning' }, 'Unsaved changes. Saving restarts the plugin.') : h('span', { className: 'small text-muted' }, 'Saved.')),
+          dirtyState[0] ? h('span', { className: 'small text-warning' }, 'Unsaved changes. Saving restarts the plugin.') : h('span', { className: 'small text-muted' }, 'Saved.')) : null,
 
-        h('details', { className: 'small' },
+        setupOpen ? h('details', { className: 'small' },
           h('summary', null, 'Diagnostics'),
           h('div', { className: 'mt-2' },
             h('div', null, 'Plugin id: ', h('code', null, status.pluginId)),
             h('div', null, 'Secrets store: ', h('code', null, status.storeFile)),
-            h('pre', { className: 'mt-2', style: { maxHeight: '320px', overflow: 'auto' } }, JSON.stringify({ devices: status.devices, discovery: status.discovery }, null, 2)))))
+            h('pre', { className: 'mt-2', style: { maxHeight: '320px', overflow: 'auto' } }, JSON.stringify({ devices: status.devices, discovery: status.discovery }, null, 2)))) : null)
     }
   }
 

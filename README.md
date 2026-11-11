@@ -64,10 +64,11 @@ Upgrading from an older checkout that used Python: the `.venv` folder and `requi
 ## Configure (Signal K Admin)
 
 1. Open Signal K Admin → **Server → Plugin Config → AlecoAir dehumidifiers** and enable the plugin.
-2. Under **AlecoAir account**, enter the **Email or phone** and **Password** of the AlecoAir app where your units appear, pick the **Region** (`eu` for Europe) and, for a phone login, the **Country code** (default `40`). Click **Sign in**.
+2. The panel opens with only the **AlecoAir account** sign-in. Enter the **Email or phone** and **Password** of the AlecoAir app where your units appear, pick the **Region** (`eu` for Europe) and, for a phone login, the **Country code** (default `40`). Click **Sign in**.
+   Sign-in is needed once, to fetch each unit's local key. A LAN scan can see a unit and its IP without signing in, but status and control over the LAN are encrypted with that per-unit key, which only the account provides. After that, control stays on the LAN with no cloud.
    The password is used once and never stored. After a successful sign-in the email or phone is kept so the panel can show the linked account. Local keys go to the plugin's own store on the server, never into the Admin-visible options.
-3. The account's devices are listed with their product id and suggested profile. Click **Add** for each dehumidifier you want.
-4. Optional: **Scan LAN** to find the units on the network. Leave **LAN IP** empty to let the plugin find the unit at start, or fill it in: an IP set here always wins.
+3. After a successful sign-in the rest of the setup appears. The account's devices are listed with their product id and suggested profile. Click **Add** for each dehumidifier you want; no LAN scan is needed for this.
+4. Optional: **Scan LAN** to find or confirm the units' IPs on the network. Leave **LAN IP** empty to let the plugin find the unit at start, or fill it in: an IP set here always wins.
 5. For each unit, check:
    - **Name** (a label only) and **Key (paths and API)** — Signal K paths and the REST API use this key. The path prefix and the default estimated power path follow the key whenever you change it and again when you Save, even if the key was first generated from the unit's name when you clicked Add;
    - **Model profile**: *Auto (by AlecoAir product id)* or a profile from the table below;
@@ -78,7 +79,7 @@ Upgrading from an older checkout that used Python: the `.venv` folder and `requi
 8. Optional: **Report to GitHub** on a running unit opens a pre-filled issue on [Haimana/signalk-alecoair](https://github.com/Haimana/signalk-alecoair/issues/new). Review the title and the live datapoints, fill in *What works* and *What does not*, then submit from your own GitHub account. The plugin never posts the issue itself and never includes local keys, Tuya device ids, account details, LAN IPs or Signal K paths. The Tuya product id is included on purpose: it is how a new model is identified.
 
 
-Sign in again whenever you re-pair a unit in the AlecoAir app (re-pairing changes its local key), or when you have added a new unit in the app: it appears in the account table with **Add**, and units already configured keep their Name, Key and paths. **Forget account** drops the device list but keeps the keys of devices that are still configured. **Remove** deletes a unit from the configuration. **Add simulator** adds a fake unit for trying the plugin without hardware.
+Sign in again whenever you re-pair a unit in the AlecoAir app (re-pairing changes its local key), or when you have added a new unit in the app: it appears in the account table with **Add**, and units already configured keep their Name, Key and paths. **Forget account** drops the device list but keeps the keys of devices that are still configured. **Remove** deletes a unit from the configuration. **Add simulator** adds a fake unit for trying the plugin without hardware; it is available before signing in. If the account was forgotten but units are still configured, the panel shows the full setup and marks any unit without a local key.
 
 You can open Plugin Config and sign in even before the first Save; the setup panel works while the plugin is still unconfigured.
 
