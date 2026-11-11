@@ -24,7 +24,7 @@
       </div>
     </header>
 
-    <nav class="switcher" id="switcher" hidden></nav>
+    <nav class="jump" id="jump" hidden aria-label="Dehumidifiers on this page"></nav>
 
     <div id="banner" class="banner"></div>
 
@@ -34,78 +34,97 @@
       <a class="ghost link" id="adminLink" href="/admin/#/serverConfiguration/plugins/signalk-alecoair">Open AlecoAir in Plugin Config</a>
     </section>
 
-    <section class="grid" id="deviceView" hidden>
-      <article class="card gauge-wrap">
-        <div class="gauge">
-          <svg viewBox="0 0 200 200" aria-hidden="true">
-            <circle cx="100" cy="100" r="78" fill="none" stroke="rgba(127,212,255,0.12)" stroke-width="14"/>
-            <circle id="arc" cx="100" cy="100" r="78" fill="none" stroke="#3ee0c3" stroke-width="14"
-              stroke-linecap="round" stroke-dasharray="490" stroke-dashoffset="490"
-              transform="rotate(-210 100 100)"/>
-          </svg>
-          <div class="gauge-readout">
-            <strong id="rh">—</strong>
-            <span>relative humidity</span>
-          </div>
-        </div>
-        <div class="stats">
-          <div class="stat" id="wattsStat"><b id="watts">— W</b><small>power (est.)</small></div>
-          <div class="stat" id="tankStat"><b id="tank">—</b><small id="tankLabel">tank</small></div>
-          <div class="stat" id="compStat"><b id="comp">—</b><small>compressor</small></div>
-        </div>
-      </article>
+    <div id="deviceList" class="device-list"></div>
 
-      <article class="card controls">
-        <div class="row" id="powerRow">
+    <!-- One of these per configured unit. With several units they stack, each fully operable. -->
+    <template id="deviceTemplate">
+      <section class="device">
+        <header class="device-head">
           <div>
-            <h2>Power</h2>
-            <p id="powerLabel" class="muted">Waiting for state…</p>
+            <h2 class="device-name" data-r="name">—</h2>
+            <p class="device-plate" data-r="plate"></p>
           </div>
-          <button id="powerBtn" class="power" type="button">OFF</button>
-        </div>
-
-        <div class="block" id="modeBlock">
-          <h2>Mode</h2>
-          <div class="seg" id="modeSeg"></div>
-        </div>
-
-        <div class="block" id="targetBlock">
-          <div class="target">
-            <h2>Target humidity</h2>
-            <b id="targetLabel">50%</b>
+          <div class="pills">
+            <span data-r="conn" class="pill">connecting…</span>
+            <span data-r="modePill" class="pill">—</span>
+            <span data-r="profilePill" class="pill">—</span>
           </div>
-          <input id="target" class="slider" type="range" min="30" max="80" step="5" value="50">
-        </div>
+        </header>
+        <div data-r="banner" class="banner"></div>
+        <div class="grid">
+          <article class="card gauge-wrap">
+            <div class="gauge">
+              <svg viewBox="0 0 200 200" aria-hidden="true">
+                <circle cx="100" cy="100" r="78" fill="none" stroke="rgba(127,212,255,0.12)" stroke-width="14"/>
+                <circle data-r="arc" cx="100" cy="100" r="78" fill="none" stroke="#3ee0c3" stroke-width="14"
+                  stroke-linecap="round" stroke-dasharray="490" stroke-dashoffset="490"
+                  transform="rotate(-210 100 100)"/>
+              </svg>
+              <div class="gauge-readout">
+                <strong data-r="rh">—</strong>
+                <span>relative humidity</span>
+              </div>
+            </div>
+            <div class="stats">
+              <div class="stat" data-r="wattsStat"><b data-r="watts">— W</b><small>power (est.)</small></div>
+              <div class="stat" data-r="tankStat"><b data-r="tank">—</b><small data-r="tankLabel">tank</small></div>
+              <div class="stat" data-r="compStat"><b data-r="comp">—</b><small>compressor</small></div>
+            </div>
+          </article>
 
-        <div class="row" id="fanRow">
-          <h2>Fan</h2>
-          <div class="seg" id="fanSeg">
-            <button type="button" data-fan="low">Low</button>
-            <button type="button" data-fan="high">High</button>
-          </div>
-        </div>
+          <article class="card controls">
+            <div class="row" data-r="powerRow">
+              <div>
+                <h2>Power</h2>
+                <p data-r="powerLabel" class="muted">Waiting for state…</p>
+              </div>
+              <button data-r="power" class="power" type="button">OFF</button>
+            </div>
 
-        <div class="row" id="timerRow">
-          <h2 id="timerTitle">Timer</h2>
-          <div class="seg">
-            <button type="button" id="timerMinus">−</button>
-            <button type="button" id="timerValue" class="active">0 h</button>
-            <button type="button" id="timerPlus">+</button>
-          </div>
-        </div>
+            <div class="block" data-r="modeBlock">
+              <h2>Mode</h2>
+              <div class="seg" data-r="modeSeg"></div>
+            </div>
 
-        <div class="row" id="toggleRow">
-          <button type="button" class="ghost" id="lockBtn">Child lock</button>
-          <button type="button" class="ghost" id="sleepBtn">Sleep</button>
-          <button type="button" class="ghost" id="dryBtn">Inside dry</button>
-        </div>
+            <div class="block" data-r="targetBlock">
+              <div class="target">
+                <h2>Target humidity</h2>
+                <b data-r="targetLabel">50%</b>
+              </div>
+              <input data-r="target" class="slider" type="range" min="30" max="80" step="5" value="50" aria-label="Target humidity">
+            </div>
 
-        <div class="alerts">
-          <div id="tankAlert" class="alert"><span id="tankAlertText">The tank is full. The unit has stopped.</span></div>
-          <div id="defrostAlert" class="alert defrost">Automatic defrost in progress. The compressor is paused.</div>
+            <div class="row" data-r="fanRow">
+              <h2>Fan</h2>
+              <div class="seg" data-r="fanSeg">
+                <button type="button" data-fan="low">Low</button>
+                <button type="button" data-fan="high">High</button>
+              </div>
+            </div>
+
+            <div class="row" data-r="timerRow">
+              <h2 data-r="timerTitle">Timer</h2>
+              <div class="seg">
+                <button type="button" data-r="timerMinus">−</button>
+                <button type="button" data-r="timer" class="active">0 h</button>
+                <button type="button" data-r="timerPlus">+</button>
+              </div>
+            </div>
+
+            <div class="row" data-r="toggleRow">
+              <button type="button" class="ghost" data-r="lock">Child lock</button>
+              <button type="button" class="ghost" data-r="sleep">Sleep</button>
+              <button type="button" class="ghost" data-r="dry">Inside dry</button>
+            </div>
+
+            <div class="alerts">
+              <div data-r="tankAlert" class="alert"><span data-r="tankAlertText">The tank is full. The unit has stopped.</span></div>
+              <div data-r="defrostAlert" class="alert defrost">Automatic defrost in progress. The compressor is paused.</div>
+            </div>
+          </article>
         </div>
-      </article>
-    </section>
+      </section>
+    </template>
 
     <p class="footer">
       Control stays on the boat LAN (Tuya TCP 6668). No Node-RED, MQTT, or cloud in the command path.
