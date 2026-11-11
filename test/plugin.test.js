@@ -171,6 +171,11 @@ test('setup routes are admin-only and never leak local keys', async () => {
   assert.equal(JSON.stringify(res.body).includes('another-fake-key'), false)
   assert.equal(JSON.stringify(res.body).includes('not-a-real-key'), false)
   assert.equal(JSON.stringify(res.body).includes('pw'), false)
+  assert.equal(res.body.account.user, 'a@b.c', 'the linked email/phone is shown in Admin')
+  assert.equal(res.body.account.passwordStored, false)
+  const onDisk = fs.readFileSync(path.join(dataRoot, 'signalk-alecoair.store.json'), 'utf8')
+  assert.equal(onDisk.includes('"pw"'), false, 'the AlecoAir password is never written')
+  assert.equal(JSON.parse(onDisk).account.user, 'a@b.c')
   const dps = await router.call('GET', '/setup/devices/:key/dps', { params: { key: 'd13' } })
   assert.equal(dps.body.suggestion, 'traditio')
   await plugin.stop()
@@ -185,4 +190,54 @@ test('a fresh install with nothing to migrate starts with no devices', async () 
   assert.deepEqual(list.body.devices, [])
   assert.match(app.statuses.at(-1), /No device yet/)
   await plugin.stop()
+})
+
+test('account table falls back to the profile set on the configured device', async () => {
+  const dataRoot = legacyInstall()
+  const { plugin, app } = boot(dataRoot)
+  await plugin.start({})
+  const options = JSON.parse(JSON.stringify(app.saved[0]))
+  await plugin.stop()
+  options.devices[0].profile = 'traditio'
+  const second = boot(dataRoot)
+  await second.plugin.start(options)
+  const status = await second.router.call('GET', '/setup/status')
+  const cloud = status.body.account.devices.find((d) => d.id === 'bfTESTDEVICE0001')
+  assert.equal(cloud.profileByProductId, null, 'testproduct00001 is not a known product')
+  assert.equal(cloud.configuredProfile, 'traditio')
+  assert.equal(status.body.account.user, null, 'migrated account has no recorded login')
+  await second.plugin.stop()
+})
+
+test('LAN discovery rows are tied to configured devices by Tuya id or IP', async () => {
+  const dataRoot = legacyInstall()
+  const scan = async () => [
+    { ip: '172.22.22.224', tcp: true },
+    { ip: '172.22.22.99', tcp: true },
+    { ip: '172.22.22.50', id: 'bfOTHER', version: '3.3', tcp: false }
+  ]
+  const discovery = new DiscoveryService({ scan })
+  const { plugin, router } = boot(dataRoot, { deps: { discovery } })
+  await plugin.start({})
+  await wait(20)
+  await router.call('POST', '/setup/discover', { body: {} })
+  const status = await router.call('GET', '/setup/status')
+  const rows = Object.fromEntries(status.body.discovery.devices.map((r) => [r.ip, r]))
+  assert.equal(rows['172.22.22.224'].configuredKey, 'd13')
+  assert.equal(rows['172.22.22.224'].matchedBy, 'ip')
+  assert.equal(rows['172.22.22.224'].knownId, 'bfTESTDEVICE0001')
+  assert.equal(rows['172.22.22.224'].knownVersion, '3.5')
+  assert.equal(rows['172.22.22.224'].id, undefined, 'the scan result itself is not rewritten')
+  assert.equal(rows['172.22.22.99'].configuredKey, null)
+  assert.equal(rows['172.22.22.50'].configuredKey, null, 'a different Tuya id at another IP is not claimed')
+  await plugin.stop()
+})
+
+test('Admin configurator loads and lays out by panel width, not window width', () => {
+  const vm = require('vm')
+  const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'remoteEntry.js'), 'utf8')
+  assert.equal(/col-md-\d/.test(src.replace(/\/\*[\s\S]*?\*\//g, '')), false, 'no viewport breakpoints that squeeze fields in the narrow Admin column')
+  const win = {}
+  vm.runInNewContext(src, { window: win, fetch: () => {} })
+  assert.equal(typeof win.signalk_alecoair.get, 'function')
 })

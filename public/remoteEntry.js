@@ -108,14 +108,40 @@
     try { return new Date(ms).toLocaleString() } catch (e) { return String(ms) }
   }
 
+  /*
+   * Layout. Admin shows this panel in a narrow column next to the plugin
+   * list, but Bootstrap col-md-* breakpoints follow the window width, so
+   * fields were squeezed to a few characters (protocol "3.", model "D").
+   * Use a grid that sizes from the panel's own width instead: as many
+   * >= 8.5rem columns as fit, with wide fields spanning the whole row.
+   */
+  var CSS = [
+    '.aa-c{container-type:inline-size}',
+    '.aa-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr));column-gap:.75rem;align-items:start}',
+    '.aa-grid>*{min-width:0}',
+    '.aa-grid .aa-full,.aa-grid .aa-span2{grid-column:1/-1}',
+    '@container (min-width:40rem){.aa-grid .aa-span2{grid-column:span 2}}',
+    '.aa-grid .aa-actions{align-self:end}',
+    '.alecoair-config .aa-id{overflow-wrap:anywhere}'
+  ].join('')
+
+  function ensureStyle() {
+    if (typeof document === 'undefined' || document.getElementById('alecoair-config-css')) return
+    var el = document.createElement('style')
+    el.id = 'alecoair-config-css'
+    el.textContent = CSS
+    document.head.appendChild(el)
+  }
+
   function makePanel(React) {
+    ensureStyle()
     var h = React.createElement
     var useState = React.useState
     var useEffect = React.useEffect
     var useRef = React.useRef
 
     function Field(props) {
-      return h('div', { className: 'mb-2 ' + (props.className || 'col-md-6') },
+      return h('div', { className: 'mb-2 ' + (props.className || '') },
         h('label', { className: 'form-label small mb-1' }, props.label),
         props.children,
         props.help ? h('div', { className: 'form-text' }, props.help) : null)
@@ -156,7 +182,7 @@
       return h('div', { className: 'card mb-3' },
         h('div', { className: 'card-header d-flex justify-content-between align-items-center' },
           h('strong', null, props.title), props.actions || null),
-        h('div', { className: 'card-body' }, props.children))
+        h('div', { className: 'card-body aa-c' }, props.children))
     }
 
     function Inspector(props) {
@@ -243,7 +269,7 @@
       var profiles = status.profiles || []
       var profileId = d.profile === 'auto' ? (st.profile && st.profile.id) : d.profile
       var prof = profiles.find(function (p) { return p.id === profileId }) || null
-      var discovered = ((status.discovery && status.discovery.devices) || []).find(function (x) { return x.id && x.id === d.tuyaId })
+      var discovered = ((status.discovery && status.discovery.devices) || []).find(function (x) { return (x.id && x.id === d.tuyaId) || (x.configuredKey && x.configuredKey === d.key) })
       var state = st.state || {}
 
       function set(field, value) { props.onChange(Object.assign({}, d, (function () { var o = {}; o[field] = value; return o })())) }
@@ -253,7 +279,7 @@
         ? (st.problems && st.problems.length ? 'Not started: ' + st.problems.join(', ') : (d.enabled ? 'Not running yet (save to start)' : 'Disabled'))
         : (state.connected ? 'Connected' + (state.adopted && state.adopted.protocol ? ' · Tuya ' + state.adopted.protocol : '') + (state.adopted && state.adopted.ip ? ' · ' + state.adopted.ip : '') : 'Disconnected' + (state.lastError ? ': ' + state.lastError : ''))
 
-      return h('div', { className: 'border rounded p-3 mb-3' },
+      return h('div', { className: 'border rounded p-3 mb-3 aa-c' },
         h('div', { className: 'd-flex justify-content-between align-items-start mb-2' },
           h('div', null,
             h('strong', null, d.name || d.key), ' ', h('code', { className: 'small' }, d.key),
@@ -270,38 +296,38 @@
           h('div', { className: 'btn-group btn-group-sm' },
             h('button', { type: 'button', className: 'btn btn-outline-secondary', onClick: function () { inspectState[1](!inspectState[0]) }, disabled: !st.running }, inspectState[0] ? 'Close inspector' : 'DP inspector'),
             h('button', { type: 'button', className: 'btn btn-outline-danger', onClick: props.onRemove }, 'Remove'))),
-        h('div', { className: 'row' },
-          h(Field, { label: 'Name', className: 'col-md-4' }, h(TextInput, { value: d.name, onChange: function (v) { set('name', v) } })),
-          h(Field, { label: 'Key (paths and API)', className: 'col-md-4', help: 'a-z, 0-9, _' }, h(TextInput, { value: d.key, onChange: function (v) { set('key', slugKey(v, '')) } })),
-          h(Field, { label: 'Tuya device id', className: 'col-md-4' }, h(TextInput, { value: d.tuyaId, readOnly: true })),
+        h('div', { className: 'aa-grid' },
+          h(Field, { label: 'Name' }, h(TextInput, { value: d.name, onChange: function (v) { set('name', v) } })),
+          h(Field, { label: 'Key (paths and API)', help: 'a-z, 0-9, _' }, h(TextInput, { value: d.key, onChange: function (v) { set('key', slugKey(v, '')) } })),
+          h(Field, { label: 'Tuya device id', className: 'aa-full' }, h(TextInput, { value: d.tuyaId, readOnly: true })),
           h(Field, {
-            label: 'LAN IP', className: 'col-md-4',
+            label: 'LAN IP',
             help: discovered && discovered.ip !== d.ip ? h('span', null, 'Found on LAN at ' + discovered.ip + ' ', h('button', { type: 'button', className: 'btn btn-link btn-sm p-0', onClick: function () { set('ip', discovered.ip) } }, 'use')) : 'Empty = find it on the LAN at start. A fixed IP here always wins.'
           }, h(TextInput, { value: d.ip, placeholder: 'auto', onChange: function (v) { set('ip', v.trim()) } })),
-          h(Field, { label: 'Tuya protocol', className: 'col-md-2' }, h(Select, {
+          h(Field, { label: 'Tuya protocol' }, h(Select, {
             value: d.protocol || 'auto', onChange: function (v) { set('protocol', v) },
             options: (status.protocols || ['auto', '3.3', '3.4', '3.5']).map(function (p) { return { value: p, label: p } })
           })),
-          h(Field, { label: 'Model profile', className: 'col-md-4' }, h(Select, {
+          h(Field, { label: 'Model profile', className: 'aa-span2' }, h(Select, {
             value: d.profile || 'auto', onChange: function (v) { var n = Object.assign({}, d, { profile: v, model: '' }); props.onChange(n) },
             options: [{ value: 'auto', label: 'Auto (by AlecoAir product id)' }].concat(profiles.map(function (p) {
               return { value: p.id, label: p.name + (p.verified ? ' ✓' : p.id === 'generic' ? '' : ' (unverified)') }
             }))
           })),
-          h(Field, { label: 'Model (power estimate)', className: 'col-md-2' }, h(Select, {
+          h(Field, { label: 'Model (power estimate)' }, h(Select, {
             value: d.model || '', onChange: function (v) { set('model', v) },
             options: [{ value: '', label: '—' }].concat(((prof && prof.models) || []).map(function (m) { return { value: m.id, label: m.name } }))
           })),
-          h(Field, { label: 'Product id', className: 'col-md-4' }, h(TextInput, { value: d.productId, onChange: function (v) { set('productId', v.trim()) } })),
-          h(Field, { label: 'Poll interval (s)', className: 'col-md-2' }, h(TextInput, { type: 'number', value: d.pollSeconds, onChange: function (v) { set('pollSeconds', Number(v) || 8) } })),
-          h('div', { className: 'col-md-6 pt-4' },
+          h(Field, { label: 'Product id', className: 'aa-span2' }, h(TextInput, { value: d.productId, onChange: function (v) { set('productId', v.trim()) } })),
+          h(Field, { label: 'Poll interval (s)' }, h(TextInput, { type: 'number', value: d.pollSeconds, onChange: function (v) { set('pollSeconds', Number(v) || 8) } })),
+          h('div', { className: 'aa-span2 pt-1 mb-2' },
             h(Check, { id: 'en-' + d.key, label: 'Enabled', checked: d.enabled !== false, onChange: function (v) { set('enabled', v) }, className: 'form-check-inline' }),
             h(Check, { id: 'sim-' + d.key, label: 'Simulator (no hardware)', checked: d.simulate, onChange: function (v) { set('simulate', v) }, className: 'form-check-inline' }))),
-        h('div', { className: 'row' },
-          h(Field, { label: 'Signal K path prefix', className: 'col-md-6' }, h(TextInput, { value: d.paths.prefix, onChange: function (v) { setPath('prefix', v.trim()) } })),
-          h(Field, { label: 'Estimated power path (empty = off)', className: 'col-md-6' }, h(TextInput, { value: d.paths.electrical, onChange: function (v) { setPath('electrical', v.trim()) } })),
-          h('div', { className: 'col-md-6 pt-2' }, h(Check, { id: 'cab-' + d.key, label: 'Also publish the unit\u2019s humidity as cabin humidity', checked: d.paths.publishCabinHumidity, onChange: function (v) { setPath('publishCabinHumidity', v) } })),
-          h(Field, { label: 'Cabin humidity path', className: 'col-md-6' }, h(TextInput, { value: d.paths.cabinHumidity, onChange: function (v) { setPath('cabinHumidity', v.trim()) } }))),
+        h('div', { className: 'aa-grid' },
+          h(Field, { label: 'Signal K path prefix', className: 'aa-span2' }, h(TextInput, { value: d.paths.prefix, onChange: function (v) { setPath('prefix', v.trim()) } })),
+          h(Field, { label: 'Estimated power path (empty = off)', className: 'aa-span2' }, h(TextInput, { value: d.paths.electrical, onChange: function (v) { setPath('electrical', v.trim()) } })),
+          h('div', { className: 'aa-span2 pt-1' }, h(Check, { id: 'cab-' + d.key, label: 'Also publish the unit\u2019s humidity as cabin humidity', checked: d.paths.publishCabinHumidity, onChange: function (v) { setPath('publishCabinHumidity', v) } })),
+          h(Field, { label: 'Cabin humidity path', className: 'aa-span2' }, h(TextInput, { value: d.paths.cabinHumidity, onChange: function (v) { setPath('cabinHumidity', v.trim()) } }))),
         inspectState[0] && st.running ? h(Inspector, { device: d, status: status, onChange: function (o) { set('dpOverrides', o) } }) : null)
     }
 
@@ -320,8 +346,18 @@
       function setDraft(next) { setDraftRaw(next); dirtyState[1](true) }
       function note(kind, text) { msgState[1](text ? { kind: kind, text: text } : null) }
 
+      var prefilled = useRef(false)
+
       function refresh() {
-        return api('/setup/status').then(function (s) { statusState[1](s) }).catch(function (e) { note('warning', e.message) })
+        return api('/setup/status').then(function (s) {
+          statusState[1](s)
+          // Show which account is linked. Only the email/phone is kept; the password never is.
+          var user = s && s.account && s.account.linked && s.account.user
+          if (user && !prefilled.current) {
+            prefilled.current = true
+            loginState[1](function (l) { return l.account ? l : Object.assign({}, l, { account: user }) })
+          }
+        }).catch(function (e) { note('warning', e.message) })
       }
 
       useEffect(function () {
@@ -439,26 +475,35 @@
         h('p', { className: 'small' }, account.linked
           ? 'Signed in via ' + (account.source || 'AlecoAir') + ' (region ' + (account.region || '—') + ', ' + fmtTime(account.linkedAt) + '). Sign in again to refresh local keys after re-pairing a unit.'
           : 'Sign in once with the email or phone and password of the AlecoAir app where the units already appear. The password is not stored; only each device\u2019s local key is kept on this server. Control then stays on the LAN.'),
-        h('form', { className: 'row', onSubmit: doLogin },
-          h(Field, { label: 'Email or phone', className: 'col-md-4' }, h(TextInput, { value: login.account, autoComplete: 'username', onChange: function (v) { loginState[1](Object.assign({}, login, { account: v })) } })),
-          h(Field, { label: 'Password', className: 'col-md-3' }, h(TextInput, { type: 'password', value: login.password, autoComplete: 'current-password', onChange: function (v) { loginState[1](Object.assign({}, login, { password: v })) } })),
-          h(Field, { label: 'Region', className: 'col-md-2' }, h(Select, { value: login.region, onChange: function (v) { loginState[1](Object.assign({}, login, { region: v })) }, options: ['eu', 'us', 'cn', 'in'].map(function (r) { return { value: r, label: r } }) })),
-          h(Field, { label: 'Country code (phone)', className: 'col-md-1' }, h(TextInput, { value: login.countryCode, onChange: function (v) { loginState[1](Object.assign({}, login, { countryCode: v })) } })),
-          h('div', { className: 'col-md-2 d-flex align-items-end mb-2' },
+        account.linked ? h('p', { className: 'small text-muted' },
+          account.user
+            ? h('span', null, 'Linked account: ', h('b', null, account.user), '. ')
+            : 'The linked account\u2019s email or phone was not recorded (that sign-in happened before this version kept it), so the field below is empty. ',
+          'The password is never stored, so its field is always empty; type it only to sign in again.') : null,
+        h('form', { className: 'aa-grid', onSubmit: doLogin },
+          h(Field, { label: 'Email or phone', className: 'aa-span2' }, h(TextInput, { value: login.account, autoComplete: 'username', onChange: function (v) { loginState[1](Object.assign({}, login, { account: v })) } })),
+          h(Field, { label: 'Password', className: 'aa-span2' }, h(TextInput, { type: 'password', value: login.password, autoComplete: 'current-password', placeholder: account.linked ? 'not stored; needed only to sign in again' : '', onChange: function (v) { loginState[1](Object.assign({}, login, { password: v })) } })),
+          h(Field, { label: 'Region' }, h(Select, { value: login.region, onChange: function (v) { loginState[1](Object.assign({}, login, { region: v })) }, options: ['eu', 'us', 'cn', 'in'].map(function (r) { return { value: r, label: r } }) })),
+          h(Field, { label: 'Country code (phone)' }, h(TextInput, { value: login.countryCode, onChange: function (v) { loginState[1](Object.assign({}, login, { countryCode: v })) } })),
+          h('div', { className: 'aa-actions mb-2' },
             h('button', { type: 'submit', className: 'btn btn-sm btn-primary w-100', disabled: busyState[0] === 'login' || !login.account || !login.password }, busyState[0] === 'login' ? 'Signing in…' : 'Sign in'))),
-        cloud.length ? h('table', { className: 'table table-sm small mt-2 mb-0' },
+        cloud.length ? h('div', { className: 'table-responsive mt-2' }, h('table', { className: 'table table-sm small mb-0' },
           h('thead', null, h('tr', null, h('th', null, 'Device'), h('th', null, 'Product'), h('th', null, 'Profile'), h('th', null, 'Key'), h('th', null, ''))),
           h('tbody', null, cloud.map(function (c) {
             var key = configuredIds[c.id]
             return h('tr', { key: c.id },
-              h('td', null, c.name, c.dehumidifier ? '' : h('span', { className: 'text-muted' }, ' (not a dehumidifier?)'), h('div', { className: 'text-muted' }, c.id)),
-              h('td', null, c.productName || '—', h('div', { className: 'text-muted' }, c.productId || '')),
-              h('td', null, c.profileByProductId || h('span', { className: 'text-muted' }, 'none (read-only until mapped)')),
+              h('td', null, c.name, c.dehumidifier ? '' : h('span', { className: 'text-muted' }, ' (not a dehumidifier?)'), h('div', { className: 'text-muted aa-id' }, c.id)),
+              h('td', null, c.productName || '—', h('div', { className: 'text-muted aa-id' }, c.productId || '')),
+              h('td', null, c.profileByProductId
+                ? c.profileByProductId
+                : c.configuredProfile
+                  ? h('span', null, c.configuredProfile, h('div', { className: 'text-muted' }, 'set on the device'))
+                  : h('span', { className: 'text-muted' }, 'none (read-only until mapped)')),
               h('td', null, c.hasKey ? 'stored' : h('span', { className: 'text-danger' }, 'missing')),
               h('td', { className: 'text-end' }, key
                 ? h('span', { className: 'text-success' }, 'added as ', h('code', null, key))
                 : h('button', { type: 'button', className: 'btn btn-sm btn-outline-primary', disabled: !c.hasKey, onClick: function () { addCloud(c) } }, 'Add')))
-          }))) : null),
+          })))) : null),
 
         h(Section, {
           title: 'LAN discovery',
@@ -470,14 +515,18 @@
             value: (draft.discovery.subnets || []).join(', '),
             onChange: function (v) { setDraft(Object.assign({}, draft, { discovery: { subnets: v.split(',').map(function (s) { return s.trim() }).filter(Boolean) } })) }
           })),
-        (disc.devices || []).length ? h('table', { className: 'table table-sm small mb-0' },
+        (disc.devices || []).length ? h('div', { className: 'table-responsive' }, h('table', { className: 'table table-sm small mb-0' },
           h('thead', null, h('tr', null, h('th', null, 'IP'), h('th', null, 'Tuya id'), h('th', null, 'Protocol'), h('th', null, 'Seen via'), h('th', null, 'Configured'))),
           h('tbody', null, disc.devices.map(function (x) {
+            var key = x.configuredKey || (x.id && configuredIds[x.id]) || null
+            var fromConfig = h('div', { className: 'text-muted', title: 'Not announced by the unit; taken from the configured device' }, 'from config')
             return h('tr', { key: x.ip + x.id },
-              h('td', null, x.ip), h('td', null, x.id || '—'), h('td', null, x.id ? x.version : '—'),
+              h('td', null, x.ip),
+              h('td', null, x.id ? h('span', { className: 'aa-id' }, x.id) : (x.knownId ? h('span', null, h('span', { className: 'aa-id' }, x.knownId), fromConfig) : '—')),
+              h('td', null, x.id && x.version ? x.version : (x.knownVersion ? h('span', null, x.knownVersion, fromConfig) : '—')),
               h('td', null, x.id ? (x.tcp ? 'UDP + TCP' : 'UDP') : 'TCP 6668 only'),
-              h('td', null, configuredIds[x.id] ? h('code', null, configuredIds[x.id]) : '—'))
-          }))) : null),
+              h('td', null, key ? h('span', null, h('code', null, key), x.matchedBy === 'ip' ? h('div', { className: 'text-muted' }, 'matched by IP') : null) : '—'))
+          })))) : null),
 
         h(Section, {
           title: 'Dehumidifiers',

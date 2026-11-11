@@ -172,7 +172,7 @@ module.exports = function factory(app, injected = {}) {
         const login = deps.login || alecoair.login
         const listed = await login({ ...body, region })
         if (!listed || !listed.ok) return res.status(400).json({ error: (listed && listed.error) || 'AlecoAir login failed.' })
-        storeLib.setAccount(store, { source: 'alecoair', region, devices: listed.devices || [] })
+        storeLib.setAccount(store, { source: 'alecoair', region, user: body.account || body.email || null, devices: listed.devices || [] })
         persistStore()
         res.json({ ok: true, ...setupStatus() })
       } catch (err) {
@@ -207,6 +207,7 @@ module.exports = function factory(app, injected = {}) {
 
   function setupStatus() {
     const configuredById = new Map(options.devices.filter((d) => d.tuyaId).map((d) => [d.tuyaId, d.key]))
+    const configuredProfileById = new Map(options.devices.filter((d) => d.tuyaId && d.profile && d.profile !== 'auto').map((d) => [d.tuyaId, d.profile]))
     const account = store.account || {}
     return {
       pluginId: PLUGIN_ID,
@@ -217,15 +218,18 @@ module.exports = function factory(app, injected = {}) {
         linked: Boolean(account.linked),
         source: account.source || null,
         region: account.region || options.account.region,
+        user: account.user || null,
+        passwordStored: false,
         linkedAt: account.linkedAt || null,
         devices: (account.devices || []).map((d) => ({
           ...storeLib.publicCloudDevice(d),
           dehumidifier: storeLib.looksLikeDehumidifier(d),
           configuredKey: configuredById.get(d.id) || null,
-          profileByProductId: (Object.values(PROFILES).find((p) => p.productIds.includes(d.productId)) || {}).id || null
+          profileByProductId: (Object.values(PROFILES).find((p) => p.productIds.includes(d.productId)) || {}).id || null,
+          configuredProfile: configuredProfileById.get(d.id) || null
         }))
       },
-      discovery: discovery ? discovery.snapshot() : null,
+      discovery: discovery ? annotateDiscovery(discovery.snapshot()) : null,
       profiles: listProfiles(),
       roles: ROLES,
       protocols: PROTOCOLS,
@@ -248,6 +252,43 @@ module.exports = function factory(app, injected = {}) {
           },
           state: entry ? entry.runtime.getPublicState() : null,
           diagnostics: diag
+        }
+      })
+    }
+  }
+
+  /**
+   * Tie LAN discovery rows to configured devices. A row matches by Tuya id
+   * (UDP broadcast) or, for hosts seen only on TCP 6668, by the IP the device
+   * is configured with, connected on, or last answered from. Known fields are
+   * filled from the configured device and marked as such (`known`).
+   */
+  function annotateDiscovery(snap) {
+    const known = options.devices.map((d) => {
+      const entry = devices.get(d.key)
+      const st = entry ? entry.runtime.getPublicState() : null
+      const learned = (store.devices || {})[d.tuyaId] || {}
+      const adopted = (st && st.adopted) || {}
+      const ips = [d.ip, adopted.ip, learned.lastIp].filter(isLanIp)
+      const protocol = adopted.protocol || learned.protocol || (d.protocol && d.protocol !== 'auto' ? d.protocol : null)
+      return { key: d.key, tuyaId: d.tuyaId || null, ips, protocol }
+    })
+    return {
+      ...snap,
+      devices: (snap.devices || []).map((x) => {
+        let match = x.id ? known.find((k) => k.tuyaId && k.tuyaId === x.id) : null
+        let via = match ? 'id' : null
+        if (!match) {
+          match = known.find((k) => k.ips.includes(x.ip) && (!x.id || !k.tuyaId))
+          via = match ? 'ip' : null
+        }
+        if (!match) return { ...x, configuredKey: null }
+        return {
+          ...x,
+          configuredKey: match.key,
+          matchedBy: via,
+          knownId: x.id ? null : match.tuyaId,
+          knownVersion: x.version ? null : match.protocol
         }
       })
     }

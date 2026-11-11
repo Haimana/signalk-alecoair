@@ -12,6 +12,7 @@ test('only Traditio is verified', () => {
 
 test('profile is selected by the AlecoAir productId', () => {
   assert.equal(resolveProfile({ profile: 'auto', productId: 'b9oyi2yofflroq1g' }).profile.id, 'traditio')
+  assert.equal(resolveProfile({ profile: 'auto', productId: 'iodmvdwo1jjf8x5d' }).profile.id, 'traditio', 'the live D13 Traditio')
   assert.equal(resolveProfile({ profile: 'auto', productId: 'hp1sjssyokokbrsg' }).profile.id, 'shinco-home')
   assert.equal(resolveProfile({ profile: 'auto', productId: 'gcthce4ejb8nzgow' }).profile.id, 'd12-eco')
   assert.equal(resolveProfile({ profile: 'auto', productId: 'pzq25786mlkxmtbb' }).profile.id, 'd16-purify')

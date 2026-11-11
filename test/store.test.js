@@ -62,3 +62,18 @@ test('forgetting the account keeps keys of configured devices only', () => {
   assert.equal(store.getLocalKey(s, 'drop'), '')
   assert.equal(s.account.linked, false)
 })
+
+test('login keeps the account email/phone for display, never a password', () => {
+  const s = store.emptyStore()
+  store.setAccount(s, { region: 'eu', user: '  sailor@example.com ', devices: [{ id: 'bf1', localKey: 'k1' }] })
+  assert.equal(s.account.user, 'sailor@example.com')
+  assert.equal(JSON.stringify(s).includes('password'), false)
+  store.clearAccount(s, [])
+  assert.equal(s.account.user, null)
+})
+
+test('the legacy store never recorded the login, so a migrated account has no user', () => {
+  const s = store.migrateLegacyStore({ smartlifeSession: { source: 'alecoair', token_info: { access_token: 'x' } }, smartlifeDevices: [] })
+  assert.equal(s.account.linked, true)
+  assert.equal(s.account.user, null)
+})

@@ -42,7 +42,7 @@ function readJson(file) {
 function emptyStore() {
   return {
     storeVersion: STORE_VERSION,
-    account: { linked: false, source: null, region: null, linkedAt: null, devices: [] },
+    account: { linked: false, source: null, region: null, user: null, linkedAt: null, devices: [] },
     devices: {}
   }
 }
@@ -70,6 +70,7 @@ function migrateLegacyStore(raw = {}) {
     linked: Boolean(session),
     source: session ? (session.source || 'smartlife') : null,
     region: null,
+    user: null, // the legacy store never recorded which login was used
     linkedAt: raw.updatedAt || null,
     devices: cloud
   }
@@ -133,10 +134,15 @@ function updateDevice(store, tuyaId, partial) {
   return store
 }
 
-/** Record a successful AlecoAir login: the device list and the fresh local keys. */
-function setAccount(store, { source = 'alecoair', region = 'eu', devices = [] } = {}) {
+/**
+ * Record a successful AlecoAir login: the device list and the fresh local keys.
+ * `user` is the email or phone typed at sign-in, kept only so Admin can show
+ * which account is linked. The password is never passed here or stored.
+ */
+function setAccount(store, { source = 'alecoair', region = 'eu', user = null, devices = [] } = {}) {
   const cloud = devices.filter((d) => d && d.id).map(cloudDevice)
-  store.account = { linked: true, source, region, linkedAt: Date.now(), devices: cloud }
+  const label = String(user || '').trim().slice(0, 128) || null
+  store.account = { linked: true, source, region, user: label, linkedAt: Date.now(), devices: cloud }
   for (const d of cloud) {
     if (d.localKey) updateDevice(store, d.id, { localKey: d.localKey, productId: d.productId || '' })
   }
@@ -146,7 +152,7 @@ function setAccount(store, { source = 'alecoair', region = 'eu', devices = [] } 
 /** Forget the account list. Keys of devices that are still configured are kept so they keep working. */
 function clearAccount(store, keepTuyaIds = []) {
   const keep = new Set(keepTuyaIds)
-  store.account = { linked: false, source: null, region: null, linkedAt: null, devices: [] }
+  store.account = { linked: false, source: null, region: null, user: null, linkedAt: null, devices: [] }
   for (const id of Object.keys(store.devices || {})) {
     if (!keep.has(id)) delete store.devices[id]
   }

@@ -36,7 +36,8 @@ const PROFILES = {
       'Live D13 Traditio LAN dump (this project)',
       'make-all/tuya-local greenmigo_alpha_q25_pro_wifi.yaml (legacy AlecoAir_D25_Traditio)'
     ],
-    productIds: ['b9oyi2yofflroq1g'],
+    // b9oyi2yofflroq1g: D25/D13 Traditio per tuya-local; iodmvdwo1jjf8x5d: the live D13 Traditio this map was verified on.
+    productIds: ['b9oyi2yofflroq1g', 'iodmvdwo1jjf8x5d'],
     models: {
       D13: {
         name: 'D13 Traditio',
