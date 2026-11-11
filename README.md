@@ -7,7 +7,7 @@ Signal K plugin and WebApp for AlecoAir Wi-Fi dehumidifiers over Tuya LAN: sever
 - **Setup only in Signal K Admin**, in the plugin's own configurator: **Apps & Plugins → Configuration → AlecoAir dehumidifiers**.
 - **The WebApp is for use only**: control and monitoring at `http://<signalk>:3000/signalk-alecoair/`.
 
-> Version 0.0.3, an early release: only the D13 Traditio has been verified on a real unit. Pure Node.js: no Python or other system packages. Renamed from `signalk-alecoair-d13`; an existing D13 install is migrated automatically, see [Migrating from signalk-alecoair-d13](#migrating-from-signalk-alecoair-d13).
+> Version 0.0.3, an early release: only the D13 Traditio has been verified on a real unit. Pure Node.js: no Python or other system packages.
 
 **Not included yet:** native widgets for SKIP and automations that drive a unit from another Signal K humidity path (or start a heater). Both are on the roadmap; the plugin today controls and monitors the units you configure.
 
@@ -82,7 +82,6 @@ To update a Git checkout later: `cd ~/signalk-alecoair && git pull && npm instal
 
 The only npm dependency is `tuyapi` (Tuya LAN).
 
-Upgrading from an older checkout that used Python: the `.venv` folder and `requirements.txt` are no longer used and can be deleted.
 
 ## Configure (Signal K Admin)
 
@@ -125,7 +124,7 @@ UI labels are in English.
 
 ## Signal K paths
 
-Each device has its own prefix, taken from its **Key**, not from its Name. Units added in Admin default to `environment.inside.dehumidifier.<key>`. Changing the key in Plugin Config updates that prefix and the default estimated power path immediately and again on Save. A custom prefix is left as you typed it (if it ended with the previous key, only that last segment is replaced). A unit migrated from `signalk-alecoair-d13` keeps the unsuffixed `environment.inside.dehumidifier`, so existing dashboards keep working.
+Each device has its own prefix, taken from its **Key**, not from its Name. Units added in Admin default to `environment.inside.dehumidifier.<key>`. Changing the key in Plugin Config updates that prefix and the default estimated power path immediately and again on Save. A custom prefix is left as you typed it (if it ended with the previous key, only that last segment is replaced).
 
 Under the prefix, only paths the unit actually has are published:
 
@@ -140,46 +139,6 @@ Under the prefix, only paths the unit actually has are published:
 ## API
 
 `http://<signalk>:3000/plugins/signalk-alecoair/devices` lists the units and their state (see `openapi.json`). The setup endpoints (`/plugins/signalk-alecoair/setup/*`) are admin-only.
-
-## Migrating from signalk-alecoair-d13
-
-What the plugin does by itself on its first start as `signalk-alecoair`:
-
-- reads `~/.signalk/plugin-config-data/signalk-alecoair-d13.store.json` (local key, adopted device, protocol) and writes `signalk-alecoair.store.json` (mode 0600);
-- turns the old flat options, from Signal K's options or from `signalk-alecoair-d13.json`, into one device with key `d13`, profile `traditio`, model `D13`, and the old paths (`environment.inside.dehumidifier`, `electrical.loads.alecoairD13.power`, `environment.inside.humidity`). The IP the old plugin was actually using is carried over; from then on, the IP in Plugin Config is the only one that counts;
-- saves the new options as `signalk-alecoair.json`. The old files are left untouched as a backup.
-
-For a `file:`-linked install, such as `~/.signalk/package.json` containing `"signalk-alecoair-d13": "file:../signalk-alecoair-d13"`:
-
-```bash
-sudo systemctl stop signalk
-
-# 1. Backups
-cp -a ~/signalk-alecoair-d13 ~/signalk-alecoair-d13.bak
-cp -a ~/.signalk/plugin-config-data ~/.signalk/plugin-config-data.bak
-cp ~/.signalk/package.json ~/.signalk/package.json.bak
-
-# 2. New code next to the old one (copy of this repository, without .git)
-#    then its dependencies (Node only; the old Python venv is not needed)
-cd ~/signalk-alecoair && npm install --omit=dev
-
-# 3. Point Signal K at the new package name
-cd ~/.signalk
-sed -i 's#"signalk-alecoair-d13": "file:../signalk-alecoair-d13"#"signalk-alecoair": "file:../signalk-alecoair"#' package.json
-rm node_modules/signalk-alecoair-d13
-ln -s ../../signalk-alecoair node_modules/signalk-alecoair
-
-# 4. Keep the plugin enabled (the old flat config is migrated on start)
-cp plugin-config-data/signalk-alecoair-d13.json plugin-config-data/signalk-alecoair.json
-
-sudo systemctl start signalk
-```
-
-Then open Admin → Plugin Config → AlecoAir: device `d13` should be connected, with "Migrated from …" at the top. The WebApp moved from `/signalk-alecoair-d13/` to `/signalk-alecoair/`, and the REST base from `/plugins/signalk-alecoair-d13` to `/plugins/signalk-alecoair`. Signal K paths do not change.
-
-Do not keep both packages installed: two plugins would fight over the same unit's single LAN session.
-
-To roll back: stop Signal K, restore `package.json.bak`, replace the `node_modules/signalk-alecoair` link with `ln -s ../../signalk-alecoair-d13 node_modules/signalk-alecoair-d13`, and start again. The old plugin's config and store files were not modified.
 
 ## Traditio datapoints (D13, verified)
 
@@ -219,7 +178,7 @@ To treat a known profile as unknown while testing a device report (for example T
 
 ## Limits
 
-The existing `signalk-tuya` covers sockets, not dehumidifiers. This plugin runs in the Signal K Node.js process. Tuya units allow very few LAN sessions: do not run Home Assistant / tuya-local (or the old `signalk-alecoair-d13`) against the same unit at the same time.
+The existing `signalk-tuya` covers sockets, not dehumidifiers. This plugin runs in the Signal K Node.js process. Tuya units allow very few LAN sessions: do not run Home Assistant / tuya-local against the same unit at the same time.
 
 ## License
 
