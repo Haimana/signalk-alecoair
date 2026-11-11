@@ -69,8 +69,8 @@ button { font: inherit; color: inherit; }
 }
 .mode-pill:disabled { cursor: default; opacity: 0.6; }
 
-.dial { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: end; gap: 4px; }
-.ring { position: relative; width: min(100%, 230px); aspect-ratio: 1; justify-self: center; }
+.dial { position: relative; width: min(100% - 24px, 230px); justify-self: center; }
+.ring { position: relative; width: 100%; aspect-ratio: 1; }
 .ring svg { width: 100%; height: 100%; overflow: visible; }
 .ring .track, .ring .arc { fill: none; stroke-width: 6; stroke-linecap: round; }
 .ring .track { stroke: rgba(255, 255, 255, 0.14); stroke-dasharray: 405.3 540.4; transform: rotate(135deg); transform-origin: 100px 100px; }
@@ -83,10 +83,14 @@ button { font: inherit; color: inherit; }
 }
 .ring-readout strong sup { font-size: 0.4em; vertical-align: top; margin-left: 2px; }
 .ring-readout span { color: var(--muted); font-size: 0.82rem; margin-top: 6px; }
+/* −/+ sit just outside the two lower ends of the ring, like the AlecoAir panel. */
 .round {
-  width: 44px; height: 44px; border-radius: 50%; border: 0; cursor: pointer; margin-bottom: 18px;
+  position: absolute; top: calc(86% - 22px); z-index: 1;
+  width: 44px; height: 44px; border-radius: 50%; border: 0; cursor: pointer;
   background: rgba(255, 255, 255, 0.12); color: #fff; font-size: 1.4rem; line-height: 1;
 }
+.round[data-r="minus"] { left: calc(9% - 22px); }
+.round[data-r="plus"] { left: calc(91% - 22px); }
 .round:disabled { opacity: 0.3; cursor: default; }
 
 .facts { margin: 0; text-align: center; color: var(--muted); font-size: 0.82rem; min-height: 1.1em; }
