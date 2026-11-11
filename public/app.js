@@ -14,8 +14,9 @@
  * screens), each fully operable.
  *
  * Desktop (>= 960 px): each unit is one wide card, stacked. The ring stays
- * on the left; Power, the working modes (radio list), fan speed and the
- * settings are expanded on the right instead of the bar and the sheets.
+ * on the left; on the right, Power, a working-mode dropdown with fan speed
+ * on the same row, and a fixed two-column settings grid replace the bar and
+ * the sheets, so every model gets the same card height.
  */
 
 const PLUGIN_ID = 'signalk-alecoair'
@@ -257,7 +258,13 @@ class DeviceView {
     renderHeader()
   }
 
-  /** Desktop controls panel: built once per control set, then only its state is updated. */
+  /**
+   * Desktop controls panel, same height for every model: Power; one row with
+   * the working-mode dropdown and (only if the unit has one) fan speed; a
+   * two-column settings grid sized for the densest profile; one-line note.
+   * Built once per control set, then only its state is updated, so the
+   * 2-second refresh never closes the dropdown or moves focus.
+   */
   renderSide(next) {
     const side = this.el.side
     const c = next.controls || {}
@@ -267,40 +274,58 @@ class DeviceView {
     const sig = JSON.stringify([Boolean(c.power), modes.map((m) => [m.value, m.label]), Boolean(c.fan), items])
     if (sig !== this.sideSig) {
       this.sideSig = sig
+      if (openMenu && openMenu.view === this) closeMenu(false)
+      const id = attr(this.key)
       const parts = []
-      if (c.power) {
-        parts.push(`<div class="side-power"><div><b>Power</b><small data-s="powerSub"></small></div>
-          <button type="button" class="power-toggle" data-s="power">${POWER_ICON}<span data-s="powerLabel">Off</span></button></div>`)
-      }
+      parts.push(c.power
+        ? `<div class="side-power"><div><b>Power</b><small data-s="powerSub"></small></div>
+          <button type="button" class="power-toggle" data-s="power">${POWER_ICON}<span data-s="powerLabel">Off</span></button></div>`
+        : '<div class="side-power side-slot" aria-hidden="true"></div>')
+      const cells = []
       if (modes.length) {
-        parts.push(`<div class="side-block"><h3 id="${attr(this.key)}-modes">Working mode</h3>
-          <div class="radios" role="radiogroup" aria-labelledby="${attr(this.key)}-modes">${modes.map((m) =>
-            `<button type="button" class="radio" role="radio" data-mode="${attr(m.value)}">${attr(m.label)}</button>`).join('')}</div></div>`)
+        cells.push(`<div class="side-cell side-mode"><h3 id="${id}-modes">Working mode</h3>
+          <div class="select">
+            <button type="button" class="select-btn" data-s="modeBtn" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="${id}-modes ${id}-modeval">
+              <span id="${id}-modeval" data-s="modeValue">—</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg></button>
+            <ul class="select-menu" role="listbox" data-s="modeMenu" aria-labelledby="${id}-modes" tabindex="-1" hidden>${modes.map((m) =>
+              `<li role="option" class="select-opt" data-mode="${attr(m.value)}" aria-selected="false">${attr(m.label)}</li>`).join('')}</ul>
+          </div></div>`)
       }
       if (c.fan) {
-        parts.push(`<div class="side-block"><h3 id="${attr(this.key)}-fan">Fan speed</h3>
-          <div class="radios inline" role="radiogroup" aria-labelledby="${attr(this.key)}-fan">
-            <button type="button" class="radio" role="radio" data-fan="low">Low</button>
-            <button type="button" class="radio" role="radio" data-fan="high">High</button></div></div>`)
+        cells.push(`<div class="side-cell side-fan"><h3 id="${id}-fan">Fan speed</h3>
+          <div class="segmented" role="radiogroup" aria-labelledby="${id}-fan">
+            <button type="button" role="radio" data-fan="low">Low</button>
+            <button type="button" role="radio" data-fan="high">High</button></div></div>`)
       }
-      if (items.length) {
-        const rows = items.map((item) => {
-          if (item === 'timer') {
-            return `<div class="side-row"><span>Timer off<small data-s="timerSub"></small></span>
-              <div class="stepper"><button type="button" data-s="timerMinus" aria-label="Shorter timer">−</button><b data-s="timerValue">Off</b><button type="button" data-s="timerPlus" aria-label="Longer timer">+</button></div></div>`
-          }
-          const label = { childLock: 'Child lock', sleep: 'Sleep', insideDry: 'Inside dry' }[item]
-          const sub = { childLock: 'Locks the buttons on the unit', sleep: '', insideDry: 'Dries the unit inside after use' }[item]
-          return `<div class="side-row"><span>${label}${sub ? `<small>${sub}</small>` : ''}</span>
-            <button type="button" class="switch" role="switch" aria-label="${label}" data-toggle="${item}"></button></div>`
-        })
-        parts.push(`<div class="side-block"><h3>Settings</h3>${rows.join('')}</div>`)
-      }
+      parts.push(`<div class="side-controls">${cells.join('')}</div>`)
+      const tiles = items.map((item) => {
+        if (item === 'timer') {
+          return `<div class="side-tile"><span data-s="timerLabel">Timer</span>
+            <div class="stepper mini"><button type="button" data-s="timerMinus" aria-label="Shorter timer">−</button><b data-s="timerValue">Off</b><button type="button" data-s="timerPlus" aria-label="Longer timer">+</button></div></div>`
+        }
+        const label = { childLock: 'Child lock', sleep: 'Sleep', insideDry: 'Inside dry' }[item]
+        const tip = { childLock: 'Locks the buttons on the unit', sleep: 'Sleep', insideDry: 'Dries the unit inside after use' }[item]
+        return `<div class="side-tile" title="${tip}"><span>${label}</span>
+          <button type="button" class="switch" role="switch" aria-label="${label}" data-toggle="${item}"></button></div>`
+      })
+      parts.push(`<div class="side-block side-settings"><h3>Settings</h3><div class="side-grid">${tiles.join('')}</div></div>`)
       parts.push('<p class="side-note" data-s="note"></p>')
       side.innerHTML = parts.join('')
       const q = (sel) => side.querySelector(sel)
       if (q('[data-s=power]')) q('[data-s=power]').addEventListener('click', () => this.command({ power: !(this.state && this.state.power) }))
-      side.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => this.command({ mode: b.dataset.mode })))
+      if (q('[data-s=modeBtn]')) {
+        const btn = q('[data-s=modeBtn]')
+        btn.addEventListener('click', () => (openMenu && openMenu.view === this ? closeMenu(true) : openMenuFor(this)))
+        btn.addEventListener('keydown', (ev) => {
+          if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') { ev.preventDefault(); openMenuFor(this) }
+        })
+        const menu = q('[data-s=modeMenu]')
+        menu.addEventListener('click', (ev) => {
+          const opt = ev.target.closest('[data-mode]')
+          if (opt) this.pickMode(opt.dataset.mode)
+        })
+        menu.addEventListener('keydown', (ev) => menuKey(this, ev))
+      }
       side.querySelectorAll('[data-fan]').forEach((b) => b.addEventListener('click', () => this.command({ fan: b.dataset.fan })))
       side.querySelectorAll('[data-toggle]').forEach((b) => b.addEventListener('click', () => {
         const k = b.dataset.toggle
@@ -321,12 +346,16 @@ class DeviceView {
       q('[data-s=powerLabel]').textContent = on ? 'On' : 'Off'
       q('[data-s=powerSub]').textContent = !connected ? 'Not connected' : !on ? 'The unit is off' : next.compressor ? 'Compressor running' : 'On, waiting for the hygrostat'
     }
-    side.querySelectorAll('[data-mode]').forEach((b) => {
-      const sel = b.dataset.mode === next.mode
-      b.classList.toggle('selected', sel)
-      b.setAttribute('aria-checked', String(sel))
-      b.disabled = !connected
-    })
+    if (q('[data-s=modeBtn]')) {
+      q('[data-s=modeValue]').textContent = modeLabel(next)
+      q('[data-s=modeBtn]').disabled = !connected
+      if (!connected && openMenu && openMenu.view === this) closeMenu(false)
+      side.querySelectorAll('[data-mode]').forEach((o) => {
+        const sel = o.dataset.mode === next.mode
+        o.classList.toggle('selected', sel)
+        o.setAttribute('aria-selected', String(sel))
+      })
+    }
     side.querySelectorAll('[data-fan]').forEach((b) => {
       const sel = b.dataset.fan === next.fan
       b.classList.toggle('selected', sel)
@@ -343,11 +372,19 @@ class DeviceView {
       const h = Number(next.timerHours) || 0
       const left = Math.round(Number(next.timerRemainingMin) || 0)
       q('[data-s=timerValue]').textContent = h > 0 ? `${h} h` : 'Off'
-      q('[data-s=timerSub]').textContent = h > 0 ? `Turns the unit off after ${h} h${left > 0 ? `, ${left} min left` : ''}` : 'No timer set'
+      q('[data-s=timerLabel]').closest('.side-tile').title = h > 0 ? `Turns the unit off after ${h} h${left > 0 ? `, ${left} min left` : ''}` : 'No timer set'
       q('[data-s=timerMinus]').disabled = !connected || h <= 0
       q('[data-s=timerPlus]').disabled = !connected || h >= (next.timerMaxHours || 24)
     }
-    q('[data-s=note]').textContent = `${next.profile ? `${next.profile.name}${next.profile.verified ? '' : ' (unverified map)'}. ` : ''}Setup: Signal K Admin → Plugin Config → AlecoAir.`
+    const note = `${next.profile ? `${next.profile.name}${next.profile.verified ? '' : ' (unverified map)'}. ` : ''}Setup: Signal K Admin → Plugin Config → AlecoAir.`
+    q('[data-s=note]').textContent = note
+    q('[data-s=note]').title = note
+  }
+
+  /** Desktop dropdown choice: sent at once, like a tap in the phone mode sheet. */
+  pickMode(value) {
+    closeMenu(true)
+    if (this.state && value !== this.state.mode) this.command({ mode: value })
   }
 
   async command(body) {
@@ -414,6 +451,73 @@ function closeSheet() {
   openSheet = null
   show(page.sheet, false)
 }
+
+/* Desktop working-mode dropdown: one open at a time, overlays the card (never resizes it). */
+let openMenu = null // { view }
+
+function menuParts(view) {
+  const side = view.el.side
+  return { btn: side.querySelector('[data-s=modeBtn]'), menu: side.querySelector('[data-s=modeMenu]') }
+}
+
+function openMenuFor(view) {
+  if (!view.state || !view.state.connected) return
+  if (openMenu && openMenu.view !== view) closeMenu(false)
+  const { btn, menu } = menuParts(view)
+  if (!btn || !menu) return
+  openMenu = { view }
+  view.root.classList.add('menu-open')
+  menu.hidden = false
+  btn.setAttribute('aria-expanded', 'true')
+  const opts = [...menu.querySelectorAll('[data-mode]')]
+  const cur = opts.find((o) => o.dataset.mode === view.state.mode) || opts[0]
+  setActive(menu, cur)
+  menu.focus({ preventScroll: true })
+}
+
+function closeMenu(refocus) {
+  if (!openMenu) return
+  const { view } = openMenu
+  openMenu = null
+  view.root.classList.remove('menu-open')
+  const { btn, menu } = menuParts(view)
+  if (menu) menu.hidden = true
+  if (btn) {
+    btn.setAttribute('aria-expanded', 'false')
+    if (refocus) btn.focus({ preventScroll: true })
+  }
+}
+
+function setActive(menu, opt) {
+  menu.querySelectorAll('.select-opt').forEach((o) => o.classList.toggle('active', o === opt))
+  if (opt) {
+    if (!opt.id) opt.id = `${menu.getAttribute('aria-labelledby')}-${opt.dataset.mode}`
+    menu.setAttribute('aria-activedescendant', opt.id)
+  }
+}
+
+function menuKey(view, ev) {
+  const { menu } = menuParts(view)
+  const opts = [...menu.querySelectorAll('[data-mode]')]
+  const i = opts.findIndex((o) => o.classList.contains('active'))
+  if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+    ev.preventDefault()
+    const n = opts.length
+    setActive(menu, opts[((i < 0 ? 0 : i) + (ev.key === 'ArrowDown' ? 1 : -1) + n) % n])
+  } else if (ev.key === 'Home' || ev.key === 'End') {
+    ev.preventDefault()
+    setActive(menu, opts[ev.key === 'Home' ? 0 : opts.length - 1])
+  } else if (ev.key === 'Enter' || ev.key === ' ') {
+    ev.preventDefault()
+    if (opts[i]) view.pickMode(opts[i].dataset.mode)
+  } else if (ev.key === 'Tab') {
+    closeMenu(false)
+  }
+}
+
+document.addEventListener('pointerdown', (ev) => {
+  if (openMenu && !ev.target.closest('.select')) closeMenu(false)
+})
 
 function rowButton(label, selected, onClick, sub) {
   const b = document.createElement('button')
@@ -499,9 +603,17 @@ function renderSheet() {
 
 page.sheetCancel.addEventListener('click', closeSheet)
 page.sheet.addEventListener('click', (ev) => { if (ev.target === page.sheet) closeSheet() })
-document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && openSheet) closeSheet() })
+document.addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Escape') return
+  if (openMenu) closeMenu(true)
+  else if (openSheet) closeSheet()
+})
 // Growing the window past the breakpoint closes a phone sheet; the controls are on the card then.
-WIDE.addEventListener('change', () => { if (WIDE.matches && openSheet) closeSheet() })
+// Shrinking below it closes the desktop mode dropdown.
+WIDE.addEventListener('change', () => {
+  if (WIDE.matches && openSheet) closeSheet()
+  if (!WIDE.matches && openMenu) closeMenu(false)
+})
 
 function renderHeader() {
   const list = devices.map((d) => (views.get(d.key) || {}).summary || d)
@@ -537,6 +649,7 @@ function syncViews(next) {
     return false
   }
   if (openSheet) closeSheet()
+  if (openMenu) closeMenu(false)
   views.clear()
   page.list.replaceChildren()
   for (const d of next) {
