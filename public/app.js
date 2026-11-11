@@ -200,7 +200,9 @@ class DeviceView {
     const kp = ringPoint(clamp((target - SCALE.min) / (SCALE.max - SCALE.min), 0, 1))
     e.knob.setAttribute('cx', kp.x.toFixed(1))
     e.knob.setAttribute('cy', kp.y.toFixed(1))
-    show(e.knob, showTarget)
+    // SVG elements have no .hidden property, so toggle visibility directly.
+    e.knob.setAttribute('visibility', showTarget ? 'visible' : 'hidden')
+    e.arc.setAttribute('visibility', rhPct > 0 ? 'visible' : 'hidden')
     if (showTarget) e.target.innerHTML = `${Math.round(target)}<sup>%</sup>`
     else if (c.targetHumidity && continuous) e.target.textContent = 'CO'
     else e.target.innerHTML = hasRh ? `${Math.round(rh)}<sup>%</sup>` : '—'
