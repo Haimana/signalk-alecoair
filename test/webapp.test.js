@@ -14,7 +14,7 @@ test('WebApp script compiles', () => {
   assert.doesNotThrow(() => new vm.Script(app, { filename: 'app.js' }))
 })
 
-test('every unit is rendered from one per-device template (stacked, no tab switcher)', () => {
+test('every unit is rendered from one compact per-device template (stacked, no tab switcher)', () => {
   const tpl = html.match(/<template id="deviceTemplate">([\s\S]*?)<\/template>/)
   assert.ok(tpl, 'index.html has the per-device template')
   assert.equal(/\sid="/.test(tpl[1]), false, 'no ids inside the template, it is cloned once per unit')
@@ -27,4 +27,14 @@ test('every element the device card script uses exists in the template', () => {
   const roles = new Set([...tpl.matchAll(/data-r="([A-Za-z]+)"/g)].map((m) => m[1]))
   const used = new Set([...app.matchAll(/\b(?:e|this\.el)\.([A-Za-z]+)\b/g)].map((m) => m[1]))
   for (const r of used) assert.ok(roles.has(r), `template is missing data-r="${r}"`)
+})
+
+test('mode, fan and settings open one shared bottom sheet; only reported controls are offered', () => {
+  assert.ok(/id="sheetBackdrop"/.test(html), 'bottom sheet in the page')
+  for (const r of ['powerBtn', 'modeBtn', 'fanBtn', 'settingsBtn', 'minus', 'plus', 'target', 'indoor']) {
+    assert.ok(html.includes(`data-r="${r}"`), `card has ${r}`)
+  }
+  assert.ok(/show\(e\.fanBtn, c\.fan\)/.test(app), 'fan button follows controls.fan')
+  assert.ok(/st\.modes/.test(app), 'mode sheet lists the plugin modes from state')
+  assert.equal(/Manual|Sleeping/.test(app), false, 'no hard-coded official-app mode names')
 })
