@@ -68,7 +68,7 @@ class DiscoveryService {
   }
 }
 
-/** Accept "172.22.22.0/24", "172.22.22." or "172.22.22" and return a /24 prefix. */
+/** Accept "192.168.1.0/24", "192.168.1." or "192.168.1" and return a /24 prefix. */
 function toPrefix(subnet) {
   const m = String(subnet || '').trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})/)
   if (!m) return null

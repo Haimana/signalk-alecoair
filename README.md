@@ -4,12 +4,23 @@ Signal K plugin and WebApp for AlecoAir Wi-Fi dehumidifiers over Tuya LAN: sever
 
 - **Local control.** Each unit is driven over the boat LAN with the Tuya LAN protocol (TCP 6668), protocol 3.5 with automatic fallback 3.5 → 3.4 → 3.3. No Tuya cloud, Node-RED, Home Assistant or MQTT in the command path. The AlecoAir account is used only during setup, to fetch each unit's local key.
 - **Several units, one plugin.** Every unit has its own LAN session, Signal K path prefix and model profile (which datapoints, modes and settings it has).
-- **Setup only in Signal K Admin**, in the plugin's own configurator: **Server → Plugin Config → AlecoAir dehumidifiers**.
+- **Setup only in Signal K Admin**, in the plugin's own configurator: **Apps & Plugins → Configuration → AlecoAir dehumidifiers**.
 - **The WebApp is for use only**: control and monitoring at `http://<signalk>:3000/signalk-alecoair/`.
 
-> Version 0.0.3, an early release: only the D13 Traditio has been verified on a real unit. Pure Node.js: no Python or other system packages. Renamed from `signalk-alecoair-d13`; an existing D13 install is migrated automatically, see [Migrating from signalk-alecoair-d13](#migrating-from-signalk-alecoair-d13). Not published on npm: install from GitHub as shown below.
+> Version 0.0.3, an early release: only the D13 Traditio has been verified on a real unit. Pure Node.js: no Python or other system packages. Renamed from `signalk-alecoair-d13`; an existing D13 install is migrated automatically, see [Migrating from signalk-alecoair-d13](#migrating-from-signalk-alecoair-d13).
 
 **Not included yet:** native widgets for SKIP and automations that drive a unit from another Signal K humidity path (or start a heater). Both are on the roadmap; the plugin today controls and monitors the units you configure.
+
+
+## Screenshots
+
+The WebApp is for day-to-day control. All setup is in Signal K Admin.
+
+![AlecoAir WebApp](./docs/screenshots/webapp.png)
+
+![Plugin setup in Signal K Admin](./docs/screenshots/admin-setup.png)
+
+![Device settings in Signal K Admin](./docs/screenshots/admin-device.png)
 
 ## Supported models
 
@@ -37,7 +48,17 @@ The plugin only exposes controls that the profile maps **and** the unit actually
 
 ### Steps
 
-The package is not on npm. On the Signal K server:
+**From the Signal K App Store** (once the package is on npm): in Admin, open **Apps & Plugins → Store**, search for **AlecoAir**, and install `signalk-alecoair`. Then restart Signal K if the server asks you to.
+
+**From npm**, on the Signal K server:
+
+```bash
+cd ~/.signalk
+npm install signalk-alecoair
+sudo systemctl restart signalk
+```
+
+**From GitHub**, for development or if you want a checkout you can edit:
 
 ```bash
 # 1. Get the code and its dependencies
@@ -55,15 +76,15 @@ sudo systemctl restart signalk
 
 The entry in `~/.signalk/node_modules` **must be named `signalk-alecoair`**: Signal K loads plugins and mounts webapps by package name.
 
-To update later: `cd ~/signalk-alecoair && git pull && npm install --omit=dev`, then restart Signal K.
+To update a Git checkout later: `cd ~/signalk-alecoair && git pull && npm install --omit=dev`, then restart Signal K.
 
-The only npm dependency is `tuyapi` (Tuya LAN). Once the package is published on npm, it can be installed from the Signal K App Store like any other plugin, with no extra steps.
+The only npm dependency is `tuyapi` (Tuya LAN).
 
 Upgrading from an older checkout that used Python: the `.venv` folder and `requirements.txt` are no longer used and can be deleted.
 
 ## Configure (Signal K Admin)
 
-1. Open Signal K Admin → **Server → Plugin Config → AlecoAir dehumidifiers** and enable the plugin.
+1. Open Signal K Admin → **Apps & Plugins → Configuration → AlecoAir dehumidifiers** and enable the plugin.
 2. The panel opens with only the **AlecoAir account** sign-in. Enter the **Email or phone** and **Password** of the AlecoAir app where your units appear, pick the **Region** (`eu` for Europe) and, for a phone login, the **Country code** (default `40`). Click **Sign in**.
    Sign-in is needed once, to fetch each unit's local key. A LAN scan can see a unit and its IP without signing in, but status and control over the LAN are encrypted with that per-unit key, which only the account provides. After that, control stays on the LAN with no cloud.
    The password is used once and never stored. After a successful sign-in the email or phone is kept so the panel can show the linked account. Local keys go to the plugin's own store on the server, never into the Admin-visible options.

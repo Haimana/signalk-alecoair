@@ -569,7 +569,7 @@
           actions: h('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary', disabled: busyState[0] === 'scan' || disc.scanning, onClick: doScan }, busyState[0] === 'scan' || disc.scanning ? 'Scanning…' : 'Scan LAN')
         },
         h('p', { className: 'small mb-2' }, 'Optional: finds the units\u2019 LAN IPs. Adding from the account does not need a scan, and a scan alone cannot control a unit. One shared scan (Tuya UDP 6666/6667 plus a TCP 6668 sweep) serves every device without a fixed IP. Last scan: ' + fmtTime(disc.lastScanAt) + (disc.lastError ? ' · ' + disc.lastError : '')),
-        h(Field, { label: 'Extra subnets to sweep (comma separated, e.g. 172.22.22.0/24; empty = local /24s)', className: 'col-12' },
+        h(Field, { label: 'Extra subnets to sweep (comma separated, e.g. 192.168.1.0/24; empty = local /24s)', className: 'col-12' },
           h(TextInput, {
             value: (draft.discovery.subnets || []).join(', '),
             onChange: function (v) { setDraft(Object.assign({}, draft, { discovery: { subnets: v.split(',').map(function (s) { return s.trim() }).filter(Boolean) } })) }

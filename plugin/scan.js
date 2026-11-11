@@ -165,9 +165,7 @@ function localPrefixes() {
       prefixes.add(`${parts[0]}.${parts[1]}.${parts[2]}.`)
     }
   }
-  const all = [...prefixes]
-  const boat = all.filter((p) => p.startsWith('172.22.22.'))
-  return boat.length ? boat : all
+  return [...prefixes]
 }
 
 function probePort(ip, port, timeoutMs) {

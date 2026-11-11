@@ -15,7 +15,12 @@
   "signalk-plugin-enabled-by-default": false,
   "signalk": {
     "displayName": "AlecoAir",
-    "appIcon": "./icon.svg"
+    "appIcon": "./public/icon.svg",
+    "screenshots": [
+      "./docs/screenshots/webapp.png",
+      "./docs/screenshots/admin-setup.png",
+      "./docs/screenshots/admin-device.png"
+    ]
   },
   "scripts": {
     "test": "node --test"
@@ -23,7 +28,7 @@
   "engines": {
     "node": ">=18"
   },
-  "author": "Signal K AlecoAir",
+  "author": "Seb D",
   "license": "Apache-2.0",
   "dependencies": {
     "tuyapi": "^7.7.1"
@@ -31,6 +36,17 @@
   "files": [
     "plugin",
     "public",
-    "openapi.json"
-  ]
+    "openapi.json",
+    "docs",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Haimana/signalk-alecoair.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Haimana/signalk-alecoair/issues"
+  },
+  "homepage": "https://github.com/Haimana/signalk-alecoair#readme"
 }
