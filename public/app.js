@@ -12,6 +12,10 @@
  * reports are shown, and the modes are the plugin's real modes for that
  * profile. Several units stack one under another (two columns on wide
  * screens), each fully operable.
+ *
+ * Desktop (>= 960 px): each unit is one wide card, stacked. The ring stays
+ * on the left; Power, the working modes (radio list), fan speed and the
+ * settings are expanded on the right instead of the bar and the sheets.
  */
 
 const PLUGIN_ID = 'signalk-alecoair'
@@ -21,6 +25,9 @@ const RING_LEN = 2 * Math.PI * 86
 const RING_ARC = RING_LEN * 0.75
 const SCALE = { min: 20, max: 90 }
 const TARGET_DEBOUNCE_MS = 700
+// Same breakpoint as styles.css: wide cards with the controls expanded on the right.
+const WIDE = window.matchMedia('(min-width: 960px)')
+const POWER_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg>'
 
 const page = {
   app: document.querySelector('.app'),
@@ -105,6 +112,7 @@ class DeviceView {
     this.pendingCommand = null
     this.hold = null
     this.targetTimer = null
+    this.sideSig = ''
     this.root = page.template.content.firstElementChild.cloneNode(true)
     this.root.id = sectionId(this.key)
     this.root.dataset.key = this.key
@@ -139,7 +147,7 @@ class DeviceView {
     const e = this.el
     e.powerBtn.addEventListener('click', () => this.command({ power: !(this.state && this.state.power) }))
     e.modeBtn.addEventListener('click', () => openSheetFor(this, 'mode'))
-    e.modePill.addEventListener('click', () => openSheetFor(this, 'mode'))
+    e.modePill.addEventListener('click', () => { if (!WIDE.matches) openSheetFor(this, 'mode') })
     e.fanBtn.addEventListener('click', () => openSheetFor(this, 'fan'))
     e.settingsBtn.addEventListener('click', () => openSheetFor(this, 'settings'))
     e.minus.addEventListener('click', () => this.stepTarget(-1))
@@ -243,9 +251,103 @@ class DeviceView {
     else if (next.profile && next.profile.id === 'generic') setBanner(e.banner, 'No model profile yet, so this unit is read-only. Pick one in Signal K Admin → Plugin Config → AlecoAir.', '')
     else setBanner(e.banner, '')
 
+    this.renderSide(next)
     this.summary = { ...this.summary, name: next.name || this.summary.name, connected, power: on }
     if (openSheet && openSheet.view === this) renderSheet()
     renderHeader()
+  }
+
+  /** Desktop controls panel: built once per control set, then only its state is updated. */
+  renderSide(next) {
+    const side = this.el.side
+    const c = next.controls || {}
+    const connected = Boolean(next.connected)
+    const modes = c.mode ? (next.modes || []) : []
+    const items = settingsItems(this)
+    const sig = JSON.stringify([Boolean(c.power), modes.map((m) => [m.value, m.label]), Boolean(c.fan), items])
+    if (sig !== this.sideSig) {
+      this.sideSig = sig
+      const parts = []
+      if (c.power) {
+        parts.push(`<div class="side-power"><div><b>Power</b><small data-s="powerSub"></small></div>
+          <button type="button" class="power-toggle" data-s="power">${POWER_ICON}<span data-s="powerLabel">Off</span></button></div>`)
+      }
+      if (modes.length) {
+        parts.push(`<div class="side-block"><h3 id="${attr(this.key)}-modes">Working mode</h3>
+          <div class="radios" role="radiogroup" aria-labelledby="${attr(this.key)}-modes">${modes.map((m) =>
+            `<button type="button" class="radio" role="radio" data-mode="${attr(m.value)}">${attr(m.label)}</button>`).join('')}</div></div>`)
+      }
+      if (c.fan) {
+        parts.push(`<div class="side-block"><h3 id="${attr(this.key)}-fan">Fan speed</h3>
+          <div class="radios inline" role="radiogroup" aria-labelledby="${attr(this.key)}-fan">
+            <button type="button" class="radio" role="radio" data-fan="low">Low</button>
+            <button type="button" class="radio" role="radio" data-fan="high">High</button></div></div>`)
+      }
+      if (items.length) {
+        const rows = items.map((item) => {
+          if (item === 'timer') {
+            return `<div class="side-row"><span>Timer off<small data-s="timerSub"></small></span>
+              <div class="stepper"><button type="button" data-s="timerMinus" aria-label="Shorter timer">−</button><b data-s="timerValue">Off</b><button type="button" data-s="timerPlus" aria-label="Longer timer">+</button></div></div>`
+          }
+          const label = { childLock: 'Child lock', sleep: 'Sleep', insideDry: 'Inside dry' }[item]
+          const sub = { childLock: 'Locks the buttons on the unit', sleep: '', insideDry: 'Dries the unit inside after use' }[item]
+          return `<div class="side-row"><span>${label}${sub ? `<small>${sub}</small>` : ''}</span>
+            <button type="button" class="switch" role="switch" aria-label="${label}" data-toggle="${item}"></button></div>`
+        })
+        parts.push(`<div class="side-block"><h3>Settings</h3>${rows.join('')}</div>`)
+      }
+      parts.push('<p class="side-note" data-s="note"></p>')
+      side.innerHTML = parts.join('')
+      const q = (sel) => side.querySelector(sel)
+      if (q('[data-s=power]')) q('[data-s=power]').addEventListener('click', () => this.command({ power: !(this.state && this.state.power) }))
+      side.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => this.command({ mode: b.dataset.mode })))
+      side.querySelectorAll('[data-fan]').forEach((b) => b.addEventListener('click', () => this.command({ fan: b.dataset.fan })))
+      side.querySelectorAll('[data-toggle]').forEach((b) => b.addEventListener('click', () => {
+        const k = b.dataset.toggle
+        this.command({ [k]: !(this.state && this.state[k]) })
+      }))
+      if (q('[data-s=timerMinus]')) {
+        q('[data-s=timerMinus]').addEventListener('click', () => this.command({ timerHours: Math.max(0, (Number(this.state.timerHours) || 0) - 1) }))
+        q('[data-s=timerPlus]').addEventListener('click', () => this.command({ timerHours: Math.min(this.state.timerMaxHours || 24, (Number(this.state.timerHours) || 0) + 1) }))
+      }
+    }
+    const q = (sel) => side.querySelector(sel)
+    const on = Boolean(next.power)
+    if (q('[data-s=power]')) {
+      const b = q('[data-s=power]')
+      b.classList.toggle('on', on)
+      b.disabled = !connected
+      b.setAttribute('aria-pressed', String(on))
+      q('[data-s=powerLabel]').textContent = on ? 'On' : 'Off'
+      q('[data-s=powerSub]').textContent = !connected ? 'Not connected' : !on ? 'The unit is off' : next.compressor ? 'Compressor running' : 'On, waiting for the hygrostat'
+    }
+    side.querySelectorAll('[data-mode]').forEach((b) => {
+      const sel = b.dataset.mode === next.mode
+      b.classList.toggle('selected', sel)
+      b.setAttribute('aria-checked', String(sel))
+      b.disabled = !connected
+    })
+    side.querySelectorAll('[data-fan]').forEach((b) => {
+      const sel = b.dataset.fan === next.fan
+      b.classList.toggle('selected', sel)
+      b.setAttribute('aria-checked', String(sel))
+      b.disabled = !connected
+    })
+    side.querySelectorAll('[data-toggle]').forEach((b) => {
+      const v = Boolean(next[b.dataset.toggle])
+      b.classList.toggle('on', v)
+      b.setAttribute('aria-checked', String(v))
+      b.disabled = !connected
+    })
+    if (q('[data-s=timerValue]')) {
+      const h = Number(next.timerHours) || 0
+      const left = Math.round(Number(next.timerRemainingMin) || 0)
+      q('[data-s=timerValue]').textContent = h > 0 ? `${h} h` : 'Off'
+      q('[data-s=timerSub]').textContent = h > 0 ? `Turns the unit off after ${h} h${left > 0 ? `, ${left} min left` : ''}` : 'No timer set'
+      q('[data-s=timerMinus]').disabled = !connected || h <= 0
+      q('[data-s=timerPlus]').disabled = !connected || h >= (next.timerMaxHours || 24)
+    }
+    q('[data-s=note]').textContent = `${next.profile ? `${next.profile.name}${next.profile.verified ? '' : ' (unverified map)'}. ` : ''}Setup: Signal K Admin → Plugin Config → AlecoAir.`
   }
 
   async command(body) {
@@ -398,6 +500,8 @@ function renderSheet() {
 page.sheetCancel.addEventListener('click', closeSheet)
 page.sheet.addEventListener('click', (ev) => { if (ev.target === page.sheet) closeSheet() })
 document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && openSheet) closeSheet() })
+// Growing the window past the breakpoint closes a phone sheet; the controls are on the card then.
+WIDE.addEventListener('change', () => { if (WIDE.matches && openSheet) closeSheet() })
 
 function renderHeader() {
   const list = devices.map((d) => (views.get(d.key) || {}).summary || d)

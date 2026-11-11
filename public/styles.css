@@ -38,13 +38,13 @@ button { font: inherit; color: inherit; }
 /* Stacked compact cards: one column on phones, two side by side on wide screens. */
 .units { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
 .app.single .units { max-width: 520px; margin: 0 auto; }
-@media (min-width: 900px) {
-  .app.multi .units { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
+/* The wide card's controls panel is a desktop feature; phones keep the bar and sheets. */
+.unit-main { display: grid; gap: 8px; align-content: start; }
+.unit-side { display: none; }
 
 .unit {
   background: var(--card); border: 1px solid var(--card-line); border-radius: var(--radius);
-  padding: 14px 14px 8px; display: grid; gap: 8px; scroll-margin-top: 12px;
+  padding: 14px 14px 8px; display: grid; gap: 8px; scroll-margin-top: 12px; align-content: start;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35); backdrop-filter: blur(6px);
 }
 .unit.off .ring, .unit.off .ring-readout strong { opacity: 0.55; }
@@ -162,3 +162,66 @@ button.sheet-row { cursor: pointer; }
 .switch.on::after { left: 23px; }
 .sheet-cancel { width: 100%; margin-top: 10px; padding: 13px; border: 0; border-radius: 14px; background: #f1f2f5; color: #374151; cursor: pointer; font-size: 0.98rem; }
 .sheet-note { color: #6b7280; font-size: 0.8rem; padding: 10px 4px 0; }
+
+/* ---------- Desktop: one wide card per unit, stacked; ring on the left, controls on the right ---------- */
+@media (min-width: 960px) {
+  .app.single .units, .units { max-width: 860px; margin: 0 auto; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .unit {
+    grid-template-columns: minmax(300px, 0.95fr) minmax(340px, 1.05fr);
+    column-gap: 22px; padding: 18px 20px;
+  }
+  .unit-main { grid-column: 1; }
+  .unit .actions { display: none; }
+  .unit-side {
+    display: grid; grid-column: 2; grid-row: 1; gap: 14px; align-content: start;
+    border-left: 1px solid var(--card-line); padding-left: 22px;
+  }
+  .mode-pill { cursor: default; }
+  .top, .app > .banner, .footer { max-width: 860px; margin-left: auto; margin-right: auto; }
+  .top { padding: 0 4px; }
+}
+
+.side-block { display: grid; gap: 6px; }
+.side-block h3 {
+  margin: 0; font-size: 0.74rem; color: var(--muted); font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+.side-power {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 12px; border-radius: 16px; background: rgba(255, 255, 255, 0.05);
+}
+.side-power b { font-size: 1rem; }
+.side-power small { display: block; color: var(--muted); font-size: 0.8rem; margin-top: 2px; }
+.power-toggle {
+  display: inline-flex; align-items: center; gap: 8px; border: 0; cursor: pointer;
+  padding: 8px 16px 8px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.10); font-weight: 600;
+}
+.power-toggle svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.power-toggle.on { background: var(--teal); color: #05251d; }
+.power-toggle:disabled { opacity: 0.4; cursor: default; }
+
+.radios { display: grid; gap: 4px; }
+.radios.inline { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+.radio {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; cursor: pointer;
+  padding: 9px 12px; border-radius: 12px; border: 1px solid transparent; background: rgba(255, 255, 255, 0.05);
+}
+.radio::before {
+  content: ""; flex: none; width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35); box-sizing: border-box;
+}
+.radio:hover { background: rgba(255, 255, 255, 0.08); }
+.radio.selected { border-color: rgba(62, 224, 195, 0.55); background: rgba(62, 224, 195, 0.10); font-weight: 600; }
+.radio.selected::before { border-color: var(--teal); background: radial-gradient(circle, var(--teal) 0 4px, transparent 5px); }
+.radio:disabled { opacity: 0.45; cursor: default; }
+
+.side-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.05);
+}
+.side-row small { display: block; color: var(--muted); font-size: 0.78rem; margin-top: 1px; }
+.side-row .stepper button { background: rgba(255, 255, 255, 0.10); border-color: transparent; color: var(--text); }
+.side-row .stepper button:disabled { opacity: 0.35; cursor: default; }
+.side-row .switch { background: rgba(255, 255, 255, 0.18); }
+.side-row .switch.on { background: var(--teal); }
+.side-note { margin: 0; color: var(--muted); font-size: 0.76rem; }

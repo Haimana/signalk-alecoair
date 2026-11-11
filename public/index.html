@@ -48,6 +48,7 @@
   <!-- One compact card per configured unit. Several units stack one under another. -->
   <template id="deviceTemplate">
     <section class="unit">
+      <div class="unit-main">
       <header class="unit-head">
         <div class="unit-title">
           <h2 data-r="name">—</h2>
@@ -78,6 +79,7 @@
       <div data-r="banner" class="banner"></div>
       <div data-r="tankAlert" class="alert">The tank is full. The unit has stopped.</div>
       <div data-r="defrostAlert" class="alert defrost">Automatic defrost in progress. The compressor is paused.</div>
+      </div>
 
       <nav class="actions">
         <button type="button" data-r="powerBtn" class="action power">
@@ -97,6 +99,9 @@
           <span>Settings</span>
         </button>
       </nav>
+
+      <!-- Wide screens only: Power, Mode and Settings expanded next to the ring (replaces the bar and sheets). -->
+      <aside data-r="side" class="unit-side" aria-label="Controls"></aside>
     </section>
   </template>
 
