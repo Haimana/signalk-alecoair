@@ -1,13 +1,15 @@
 # signalk-alecoair
 
-Native Signal K plugin and WebApp for AlecoAir Wi-Fi dehumidifiers. Several units, one LAN connection each, data-driven model profiles.
+Signal K plugin and WebApp for AlecoAir Wi-Fi dehumidifiers over Tuya LAN: several units, model profiles, setup in Signal K Admin, no cloud or Node-RED in the control path.
 
-Control stays on the boat LAN (Tuya TCP 6668). No Node-RED, Home Assistant, MQTT, or cloud in the command path. The AlecoAir account is used once during setup to fetch each unit's local key.
+- **Local control.** Each unit is driven over the boat LAN with the Tuya LAN protocol (TCP 6668), protocol 3.5 with automatic fallback 3.5 → 3.4 → 3.3. No Tuya cloud, Node-RED, Home Assistant or MQTT in the command path. The AlecoAir account is used only during setup, to fetch each unit's local key.
+- **Several units, one plugin.** Every unit has its own LAN session, Signal K path prefix and model profile (which datapoints, modes and settings it has).
+- **Setup only in Signal K Admin**, in the plugin's own configurator: **Server → Plugin Config → AlecoAir dehumidifiers**.
+- **The WebApp is for use only**: control and monitoring at `http://<signalk>:3000/signalk-alecoair/`.
 
-- **Setup** lives only in Signal K Admin: **Server → Plugin Config → AlecoAir**.
-- **The WebApp** is only for operating the units: `http://<signalk>:3000/signalk-alecoair/`
+> Version 2.0.0. Renamed from `signalk-alecoair-d13`; an existing D13 install is migrated automatically, see [Migrating from signalk-alecoair-d13](#migrating-from-signalk-alecoair-d13). Not published on npm: install from GitHub as shown below.
 
-> Renamed from `signalk-alecoair-d13`. See [Migrating from signalk-alecoair-d13](#migrating-from-signalk-alecoair-d13).
+**Not included yet:** native widgets for SKIP and automations that drive a unit from another Signal K humidity path (or start a heater). Both are on the roadmap; the plugin today controls and monitors the units you configure.
 
 ## Supported models
 
@@ -25,27 +27,72 @@ A unit whose product id matches no profile is **never** given the D13 map. It ru
 
 The plugin only exposes controls that the profile maps **and** the unit actually reports, and it never writes a DP the unit has not reported.
 
-## Setup (Signal K Admin)
+## Install
 
-1. Install the plugin (see [Install](#install)), restart Signal K and enable **AlecoAir dehumidifiers** in **Server → Plugin Config**.
-2. In the plugin's panel, under **AlecoAir account**, sign in with the email or phone and password of the **AlecoAir app** where your units already appear. Pick the region (`eu` for Romania/Europe). For a phone login, set the country code (default `40`).
-   The password is used once and is not stored. The plugin keeps each unit's local key in its own store on the Signal K server, never in the Admin-visible options.
-3. The account's devices are listed with their product id and matching profile. Click **Add** for each dehumidifier.
-4. Optional: **Scan LAN** to find the units. Leave **LAN IP** empty to let the plugin find the unit at start, or fill it in: an IP set here always wins.
-5. Check the device key (used in paths and the API), the profile, the model (for the power estimate) and the Signal K paths, then **Save configuration**. Saving restarts the plugin.
-6. Open **DP inspector** on a running device to see its live DPs. Change a setting on the unit itself and watch which DP changes, then map it to a role. Save to apply the overrides.
+### Requirements
 
-Sign in again whenever you re-pair a unit in the AlecoAir app: re-pairing changes its local key. **Forget account** drops the device list but keeps the keys of devices that are still configured.
+- A Signal K server (built and tested on signalk-server 2.37) with Node.js 18 or newer.
+- Python 3 on the server, used only for the AlecoAir account login that fetches the local keys.
+- The dehumidifiers already paired in the **AlecoAir app**, and on the same LAN as the Signal K server.
+- The AlecoAir account email (or phone) and password. You do not need to hunt for Tuya device ids or local keys yourself: the plugin reads them from the account when you sign in, once, in Admin.
 
-Python 3 with `requests` is needed for the login (see [Install](#install)). Nothing else in the plugin uses Python.
+### Steps
+
+The package is not on npm. On the Signal K server:
+
+```bash
+# 1. Get the code and its dependencies
+git clone https://github.com/Haimana/signalk-alecoair.git ~/signalk-alecoair
+cd ~/signalk-alecoair
+npm install --omit=dev
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+
+# 2. Install it into Signal K (adds "signalk-alecoair": "file:../signalk-alecoair" to ~/.signalk/package.json)
+cd ~/.signalk
+npm install ../signalk-alecoair
+
+# 3. Restart Signal K
+sudo systemctl restart signalk
+```
+
+The entry in `~/.signalk/node_modules` **must be named `signalk-alecoair`**: Signal K loads plugins and mounts webapps by package name.
+
+To update later: `cd ~/signalk-alecoair && git pull && npm install --omit=dev`, then restart Signal K.
+
+## Configure (Signal K Admin)
+
+1. Open Signal K Admin → **Server → Plugin Config → AlecoAir dehumidifiers** and enable the plugin.
+2. Under **AlecoAir account**, enter the **Email or phone** and **Password** of the AlecoAir app where your units appear, pick the **Region** (`eu` for Europe) and, for a phone login, the **Country code** (default `40`). Click **Sign in**.
+   The password is used once and never stored. After a successful sign-in the email or phone is kept so the panel can show the linked account. Local keys go to the plugin's own store on the server, never into the Admin-visible options.
+3. The account's devices are listed with their product id and suggested profile. Click **Add** for each dehumidifier you want.
+4. Optional: **Scan LAN** to find the units on the network. Leave **LAN IP** empty to let the plugin find the unit at start, or fill it in: an IP set here always wins.
+5. For each unit, check:
+   - **Name** and **Key (paths and API)**;
+   - **Model profile**: *Auto (by AlecoAir product id)* or a profile from the table below;
+   - **Model (power estimate)**, if known;
+   - **Signal K path prefix** (default `environment.inside.dehumidifier.<key>`), the optional estimated power path and cabin humidity path.
+6. Click **Save configuration**. Saving restarts the plugin; each unit shows *Connected* once its LAN session is up.
+7. Optional: open **DP inspector** on a running unit to see its live datapoints and map unknown ones to roles (useful for unverified or `generic` units).
+
+Sign in again whenever you re-pair a unit in the AlecoAir app: re-pairing changes its local key. **Forget account** drops the device list but keeps the keys of devices that are still configured. **Remove** deletes a unit from the configuration. **Add simulator** adds a fake unit for trying the plugin without hardware.
+
+Adding or removing units, credentials and profiles are only in Admin, never in the WebApp.
 
 ### Configurator and older servers
 
 The setup panel is a Signal K plugin configurator (`signalk-plugin-configurator`, Module Federation `./PluginConfigurationPanel`), written without a build step: `public/remoteEntry.js` uses the Admin UI's own React. It was built against signalk-server 2.37 (React 19 Admin UI). Servers that do not load configurators fall back to the generic JSON form from the plugin schema, which can edit the device list but cannot sign in or inspect DPs.
 
-## WebApp
+## Using the WebApp
 
-`http://<signalk>:3000/signalk-alecoair/` operates the configured units: power, mode, target humidity, timer, child lock and whatever else the unit has. With more than one unit a switcher appears at the top; `?device=<key>` opens a specific unit. There is no setup in the WebApp.
+Open `http://<signalk>:3000/signalk-alecoair/` (also listed under **Webapps** in Signal K Admin). Every configured unit gets its own card, stacked one under another; `?device=<key>` scrolls to a given unit. The look is inspired by the AlecoAir app, not a copy of it.
+
+Each card shows the unit's real modes for its profile and only the controls the unit actually reports: power, working mode, target humidity, timer, child lock and so on. The D13 Traditio has no fan control, so none is shown for it.
+
+- **Phone / narrow screens (< 960 px):** a compact card per unit with the mode, the humidity ring and −/+ for the target, and a bottom bar (Power, Mode, Fan if present, Settings). Mode, Fan and Settings open a bottom sheet.
+- **Desktop (≥ 960 px):** one wide card per unit, stacked vertically. Left: name, status, humidity ring and −/+. Right: Power, the working mode as a dropdown (with fan speed on the same row if the unit has a fan) and the settings in a fixed two-column area. All cards have the same height whatever the model, so units line up and an odd number of units leaves no stray card. Alerts (tank full, defrost, unit not responding) can still make a card taller while they are active.
+
+UI labels are in English.
 
 ## Signal K paths
 
@@ -61,28 +108,9 @@ Under the prefix, only paths the unit actually has are published:
 
 `.mode` has `possibleValues` metadata (e.g. `auto`, `continuous`, `sleep` on Traditio). Optional per device: an estimated power path (default `electrical.loads.dehumidifier<Key>.power`) and a cabin humidity path (off by default for new units).
 
-## Install
+## API
 
-The package is not on npm. On the Signal K server:
-
-```bash
-git clone https://github.com/Haimana/signalk-alecoair.git ~/signalk-alecoair
-cd ~/signalk-alecoair
-npm install --omit=dev
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-```
-
-Link it into Signal K. The entry in `~/.signalk/node_modules` **must be named `signalk-alecoair`**, because Signal K loads plugins and mounts webapps by package name:
-
-```bash
-cd ~/.signalk
-npm install ../signalk-alecoair   # adds "signalk-alecoair": "file:../signalk-alecoair" to package.json
-```
-
-Restart Signal K, then follow [Setup](#setup-signal-k-admin).
-
-API: `http://<signalk>:3000/plugins/signalk-alecoair/devices` (see `openapi.json`).
+`http://<signalk>:3000/plugins/signalk-alecoair/devices` lists the units and their state (see `openapi.json`). The setup endpoints (`/plugins/signalk-alecoair/setup/*`) are admin-only.
 
 ## Migrating from signalk-alecoair-d13
 
@@ -155,8 +183,12 @@ Manual defaults: Manual + hygrostat, CO = continuous via target `25`, restart th
 npm test
 ```
 
-Tests use `node --test` and need no hardware: fake Tuya LAN devices, the simulator, and a fake Signal K app. Add a profile in `plugin/profiles.js`; mark it `verified: false` until it has been tested on a real unit.
+Tests use `node --test` and need no hardware: fake Tuya LAN devices, the simulator, and a fake Signal K app. Add a profile in `plugin/profiles.js`; mark it `verified: false` until it has been tested on a real unit. Reports and DP maps for the unverified profiles are welcome.
 
 ## Limits
 
-The existing `signalk-tuya` covers sockets, not dehumidifiers. This plugin runs in the Signal K Node.js process. Tuya units allow very few LAN sessions: do not run Home Assistant / tuya-local against the same unit at the same time.
+The existing `signalk-tuya` covers sockets, not dehumidifiers. This plugin runs in the Signal K Node.js process. Tuya units allow very few LAN sessions: do not run Home Assistant / tuya-local (or the old `signalk-alecoair-d13`) against the same unit at the same time.
+
+## License
+
+Apache-2.0
