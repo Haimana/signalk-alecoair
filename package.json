@@ -1,6 +1,6 @@
 {
   "name": "signalk-alecoair",
-  "version": "2.0.0",
+  "version": "0.0.3",
   "description": "Signal K plugin and WebApp for AlecoAir Wi-Fi dehumidifiers over Tuya LAN: several units, model profiles, setup in Signal K Admin, no cloud or Node-RED in the control path.",
   "main": "plugin/index.js",
   "keywords": [
@@ -31,7 +31,6 @@
   "files": [
     "plugin",
     "public",
-    "openapi.json",
-    "requirements.txt"
+    "openapi.json"
   ]
 }

@@ -7,7 +7,7 @@ Signal K plugin and WebApp for AlecoAir Wi-Fi dehumidifiers over Tuya LAN: sever
 - **Setup only in Signal K Admin**, in the plugin's own configurator: **Server → Plugin Config → AlecoAir dehumidifiers**.
 - **The WebApp is for use only**: control and monitoring at `http://<signalk>:3000/signalk-alecoair/`.
 
-> Version 2.0.0. Renamed from `signalk-alecoair-d13`; an existing D13 install is migrated automatically, see [Migrating from signalk-alecoair-d13](#migrating-from-signalk-alecoair-d13). Not published on npm: install from GitHub as shown below.
+> Version 0.0.3, an early release: only the D13 Traditio has been verified on a real unit. Pure Node.js: no Python or other system packages. Renamed from `signalk-alecoair-d13`; an existing D13 install is migrated automatically, see [Migrating from signalk-alecoair-d13](#migrating-from-signalk-alecoair-d13). Not published on npm: install from GitHub as shown below.
 
 **Not included yet:** native widgets for SKIP and automations that drive a unit from another Signal K humidity path (or start a heater). Both are on the roadmap; the plugin today controls and monitors the units you configure.
 
@@ -31,8 +31,7 @@ The plugin only exposes controls that the profile maps **and** the unit actually
 
 ### Requirements
 
-- A Signal K server (built and tested on signalk-server 2.37) with Node.js 18 or newer.
-- Python 3 on the server, used only for the AlecoAir account login that fetches the local keys.
+- A Signal K server (built and tested on signalk-server 2.37) with Node.js 18 or newer. Nothing else: no Python, no compiler, no system packages. The AlecoAir account login runs in Node too, using only Node's built-in modules.
 - The dehumidifiers already paired in the **AlecoAir app**, and on the same LAN as the Signal K server.
 - The AlecoAir account email (or phone) and password. You do not need to hunt for Tuya device ids or local keys yourself: the plugin reads them from the account when you sign in, once, in Admin.
 
@@ -45,8 +44,6 @@ The package is not on npm. On the Signal K server:
 git clone https://github.com/Haimana/signalk-alecoair.git ~/signalk-alecoair
 cd ~/signalk-alecoair
 npm install --omit=dev
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
 
 # 2. Install it into Signal K (adds "signalk-alecoair": "file:../signalk-alecoair" to ~/.signalk/package.json)
 cd ~/.signalk
@@ -59,6 +56,10 @@ sudo systemctl restart signalk
 The entry in `~/.signalk/node_modules` **must be named `signalk-alecoair`**: Signal K loads plugins and mounts webapps by package name.
 
 To update later: `cd ~/signalk-alecoair && git pull && npm install --omit=dev`, then restart Signal K.
+
+The only npm dependency is `tuyapi` (Tuya LAN). Once the package is published on npm, it can be installed from the Signal K App Store like any other plugin, with no extra steps.
+
+Upgrading from an older checkout that used Python: the `.venv` folder and `requirements.txt` are no longer used and can be deleted.
 
 ## Configure (Signal K Admin)
 
@@ -131,9 +132,8 @@ cp -a ~/.signalk/plugin-config-data ~/.signalk/plugin-config-data.bak
 cp ~/.signalk/package.json ~/.signalk/package.json.bak
 
 # 2. New code next to the old one (copy of this repository, without .git)
-#    then its dependencies; reuse the old Python venv or create a new one
+#    then its dependencies (Node only; the old Python venv is not needed)
 cd ~/signalk-alecoair && npm install --omit=dev
-cp -a ~/signalk-alecoair-d13/.venv ~/signalk-alecoair/.venv   # or: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 # 3. Point Signal K at the new package name
 cd ~/.signalk
@@ -175,7 +175,7 @@ Manual defaults: Manual + hygrostat, CO = continuous via target `25`, restart th
 
 - Local keys are stored in plaintext in `~/.signalk/plugin-config-data/signalk-alecoair.store.json` (file mode 0600). They are never sent to the browser.
 - The setup API (`/plugins/signalk-alecoair/setup/*`) is admin-only when Signal K security is on. The usage API needs read or read/write access.
-- `plugin/alecoair-helper.py` uses the AlecoAir app's public Tuya client id. If the vendor rotates it, login breaks; LAN control keeps working with the keys already stored.
+- The AlecoAir sign-in (`plugin/alecoair.js`) talks to the AlecoAir/Tuya cloud over HTTPS the way the phone app does, using the app's public Tuya client id. If the vendor rotates it, sign-in breaks; LAN control keeps working with the keys already stored. The password is MD5-hashed and RSA-encrypted with a per-login key from the cloud before it is sent, and it is never stored or logged.
 
 ## Development
 
@@ -183,7 +183,7 @@ Manual defaults: Manual + hygrostat, CO = continuous via target `25`, restart th
 npm test
 ```
 
-Tests use `node --test` and need no hardware: fake Tuya LAN devices, the simulator, and a fake Signal K app. Add a profile in `plugin/profiles.js`; mark it `verified: false` until it has been tested on a real unit. Reports and DP maps for the unverified profiles are welcome.
+Tests use `node --test` and need no hardware or account: fake Tuya LAN devices, the simulator, a fake Signal K app and a local fake of the AlecoAir cloud for the sign-in. Add a profile in `plugin/profiles.js`; mark it `verified: false` until it has been tested on a real unit. Reports and DP maps for the unverified profiles are welcome.
 
 ## Limits
 

@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "AlecoAir dehumidifiers (signalk-alecoair)",
-    "version": "2.0.0",
+    "version": "0.0.3",
     "description": "Usage API for the WebApp and dashboards, plus the admin-only setup API used by the Plugin Config panel. Local keys are never returned."
   },
   "servers": [{ "url": "/plugins/signalk-alecoair" }],

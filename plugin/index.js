@@ -18,7 +18,7 @@ function loadOpenApi() {
   try {
     return JSON.parse(fs.readFileSync(OPENAPI, 'utf8'))
   } catch {
-    return { openapi: '3.0.0', info: { title: 'AlecoAir', version: '2.0.0' } }
+    return { openapi: '3.0.0', info: { title: 'AlecoAir', version: '0.0.3' } }
   }
 }
 
