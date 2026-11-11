@@ -53,42 +53,15 @@ test('hiding Traditio makes the live D13 look like an unknown unit', () => {
   setHiddenProfileIds(['traditio'])
   try {
     assert.equal(getProfile('traditio'), null)
-    assert.equal(profileForProductId('iodmvdwo1jjf8x5d').id, 'report-iodmvdwo')
-    assert.equal(resolveProfile({ profile: 'auto', productId: 'iodmvdwo1jjf8x5d' }).profile.id, 'report-iodmvdwo')
+    assert.equal(profileForProductId('iodmvdwo1jjf8x5d'), null)
+    assert.equal(resolveProfile({ profile: 'auto', productId: 'iodmvdwo1jjf8x5d' }).profile.id, 'generic')
     assert.equal(resolveProfile({ profile: 'traditio', productId: 'iodmvdwo1jjf8x5d' }).profile.id, 'generic')
-    assert.equal(suggestProfile(D13_DPS), 'report-iodmvdwo')
+    assert.equal(suggestProfile(D13_DPS), null)
     assert.equal(listProfiles().some((p) => p.id === 'traditio'), false)
-    assert.ok(listProfiles().some((p) => p.id === 'report-iodmvdwo'))
     assert.ok(listProfiles().some((p) => p.id === 'generic'))
   } finally {
     setHiddenProfileIds([])
   }
   assert.equal(resolveProfile({ profile: 'auto', productId: 'iodmvdwo1jjf8x5d' }).profile.id, 'traditio')
   assert.equal(suggestProfile(D13_DPS), 'traditio')
-})
-
-test('the issue #1 draft is selected when Traditio is hidden', () => {
-  setHiddenProfileIds(['traditio'])
-  try {
-    const r = resolveProfile({ profile: 'auto', productId: 'iodmvdwo1jjf8x5d' })
-    assert.equal(r.profile.id, 'report-iodmvdwo')
-    assert.equal(r.source, 'productId')
-    assert.equal(r.profile.verified, false)
-    assert.equal(r.profile.continuous, null)
-    assert.deepEqual(r.profile.fault, {})
-    assert.deepEqual(r.profile.dps, {
-      power: 1,
-      targetHumidity: 2,
-      mode: 5,
-      humidity: 6,
-      childLock: 16,
-      timer: 17,
-      fault: 19
-    })
-    assert.deepEqual(r.profile.modes.map((m) => m.raw), ['Manual'])
-    assert.equal(r.profile.productIds.includes('b9oyi2yofflroq1g'), false)
-  } finally {
-    setHiddenProfileIds([])
-  }
-  assert.equal(resolveProfile({ profile: 'auto', productId: 'iodmvdwo1jjf8x5d' }).profile.id, 'traditio')
 })
