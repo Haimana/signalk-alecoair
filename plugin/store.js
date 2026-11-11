@@ -23,12 +23,17 @@ function defaultDataRoot() {
   return path.join(os.homedir(), '.signalk', 'plugin-config-data')
 }
 
-function storePath(dataRoot = defaultDataRoot()) {
-  return path.join(dataRoot, STORE_NAME)
+/** A usable data root: null, undefined, '' or a non-string fall back to the default. */
+function rootOrDefault(dataRoot) {
+  return typeof dataRoot === 'string' && dataRoot ? dataRoot : defaultDataRoot()
 }
 
-function legacyStorePath(dataRoot = defaultDataRoot()) {
-  return path.join(dataRoot, LEGACY_STORE_NAME)
+function storePath(dataRoot) {
+  return path.join(rootOrDefault(dataRoot), STORE_NAME)
+}
+
+function legacyStorePath(dataRoot) {
+  return path.join(rootOrDefault(dataRoot), LEGACY_STORE_NAME)
 }
 
 function readJson(file) {
@@ -97,7 +102,7 @@ function migrateLegacyStore(raw = {}) {
  * not exist yet. `legacyRaw` is the legacy file content (if any) so the
  * plugin options migration can use the adopted device it records.
  */
-function loadStore(dataRoot = defaultDataRoot()) {
+function loadStore(dataRoot) {
   const current = readJson(storePath(dataRoot))
   const legacyRaw = readJson(legacyStorePath(dataRoot))
   if (current && typeof current === 'object') {
@@ -109,7 +114,7 @@ function loadStore(dataRoot = defaultDataRoot()) {
   return { store: emptyStore(), migrated: false, legacyRaw: null }
 }
 
-function saveStore(store, dataRoot = defaultDataRoot()) {
+function saveStore(store, dataRoot) {
   const file = storePath(dataRoot)
   const next = { ...store, storeVersion: STORE_VERSION, updatedAt: Date.now() }
   fs.mkdirSync(path.dirname(file), { recursive: true })

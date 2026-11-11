@@ -77,3 +77,13 @@ test('the legacy store never recorded the login, so a migrated account has no us
   assert.equal(s.account.linked, true)
   assert.equal(s.account.user, null)
 })
+
+test('null, undefined or empty data roots fall back to the default instead of throwing', () => {
+  const expected = path.join(store.defaultDataRoot(), 'signalk-alecoair.store.json')
+  for (const root of [null, undefined, '']) {
+    assert.equal(store.storePath(root), expected)
+    assert.equal(typeof store.legacyStorePath(root), 'string')
+  }
+  assert.doesNotThrow(() => store.loadStore(null))
+  assert.equal(typeof store.loadStore(null).store, 'object')
+})

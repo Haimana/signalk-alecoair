@@ -41,6 +41,7 @@ module.exports = function factory(app, injected = {}) {
   let options = config.normalizeOptions({})
   let store = storeLib.emptyStore()
   let dataRoot = null
+  let storeLoaded = false
   let discovery = null
   let migration = null
   const devices = new Map()
@@ -61,7 +62,35 @@ module.exports = function factory(app, injected = {}) {
     if (typeof app.debug === 'function') app.debug(msg)
   }
 
+  /**
+   * Signal K Admin calls the setup routes even when the plugin is disabled or
+   * unconfigured, i.e. before start() has run. Resolve the data root lazily
+   * (same rule as start) so those routes never see a null path.
+   */
+  function ensureDataRoot() {
+    if (!dataRoot) dataRoot = resolveDataRoot(app, deps.dataRoot)
+    return dataRoot
+  }
+
+  /**
+   * Before start(), read whatever store is already on disk (read-only: no
+   * migration is written, no file is created) so the Admin panel and a
+   * sign-in do not work on, or overwrite, an empty in-memory copy.
+   */
+  function ensureStore() {
+    ensureDataRoot()
+    if (storeLoaded) return store
+    try {
+      store = storeLib.loadStore(dataRoot).store
+    } catch (err) {
+      app.error(`AlecoAir: could not read the store: ${err.message}`)
+    }
+    storeLoaded = true
+    return store
+  }
+
   function persistStore() {
+    ensureStore()
     try {
       store = storeLib.saveStore(store, dataRoot)
     } catch (err) {
@@ -172,6 +201,7 @@ module.exports = function factory(app, injected = {}) {
         const login = deps.login || alecoair.login
         const listed = await login({ ...body, region })
         if (!listed || !listed.ok) return res.status(400).json({ error: (listed && listed.error) || 'AlecoAir login failed.' })
+        ensureStore()
         storeLib.setAccount(store, { source: 'alecoair', region, user: body.account || body.email || null, devices: listed.devices || [] })
         persistStore()
         res.json({ ok: true, ...setupStatus() })
@@ -181,12 +211,14 @@ module.exports = function factory(app, injected = {}) {
     })
 
     router.post('/setup/unlink', (_req, res) => {
+      ensureStore()
       storeLib.clearAccount(store, options.devices.map((d) => d.tuyaId).filter(Boolean))
       persistStore()
       res.json({ ok: true, ...setupStatus() })
     })
 
     router.post('/setup/discover', async (_req, res) => {
+      if (!discovery) return res.status(409).json({ error: 'The plugin is not running yet. Save the configuration to enable it, then scan.' })
       try {
         await discovery.scan({ force: true })
         res.json({ ok: true, discovery: discovery.snapshot() })
@@ -206,6 +238,7 @@ module.exports = function factory(app, injected = {}) {
   plugin.getOpenApi = () => loadOpenApi()
 
   function setupStatus() {
+    ensureStore()
     const configuredById = new Map(options.devices.filter((d) => d.tuyaId).map((d) => [d.tuyaId, d.key]))
     const configuredProfileById = new Map(options.devices.filter((d) => d.tuyaId && d.profile && d.profile !== 'auto').map((d) => [d.tuyaId, d.profile]))
     const account = store.account || {}
@@ -477,6 +510,7 @@ module.exports = function factory(app, injected = {}) {
     dataRoot = resolveDataRoot(app, deps.dataRoot)
     const loaded = storeLib.loadStore(dataRoot)
     store = loaded.store
+    storeLoaded = true
     if (loaded.migrated) {
       persistStore()
       debug(`Migrated ${storeLib.LEGACY_STORE_NAME} to ${storeLib.STORE_NAME}`)
