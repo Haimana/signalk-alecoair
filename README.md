@@ -22,8 +22,6 @@ The WebApp is for day-to-day control. All setup is in Signal K Admin.
 
 ![Plugin setup in Signal K Admin](./docs/screenshots/admin-setup.png)
 
-![Device settings in Signal K Admin](./docs/screenshots/admin-device.png)
-
 ## Supported models
 
 Every Wi-Fi AlecoAir unit is a Tuya dehumidifier (category `cs`), so the LAN transport is the same. The datapoint (DP) layout is not, so each family has a profile. The profile is picked from the Tuya product id that the AlecoAir login returns, or chosen by hand in Plugin Config.

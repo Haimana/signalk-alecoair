@@ -18,8 +18,7 @@
     "appIcon": "./public/icon.svg",
     "screenshots": [
       "./docs/screenshots/webapp.png",
-      "./docs/screenshots/admin-setup.png",
-      "./docs/screenshots/admin-device.png"
+      "./docs/screenshots/admin-setup.png"
     ]
   },
   "scripts": {
