@@ -38,13 +38,45 @@ function readLegacyPluginConfig(dataRoot) {
   }
 }
 
+function defaultElectrical(key) {
+  return `electrical.loads.${camelKey(`dehumidifier ${key}`)}.power`
+}
+
 function defaultPaths(key) {
   return {
     prefix: `${DEFAULT_PREFIX}.${key}`,
-    electrical: `electrical.loads.${camelKey(`dehumidifier ${key}`)}.power`,
+    electrical: defaultElectrical(key),
     publishCabinHumidity: false,
     cabinHumidity: 'environment.inside.relativeHumidity'
   }
+}
+
+const AUTO_PREFIX_RE = new RegExp(`^${DEFAULT_PREFIX.replace(/\./g, '\\.')}\\.[a-z0-9][a-z0-9_]{0,31}$`)
+const AUTO_ELECTRICAL_RE = /^electrical\.loads\.dehumidifier[A-Za-z0-9]*\.power$/
+
+/**
+ * Tie Signal K paths to the current device key on every normalize/save.
+ * The default prefix (environment.inside.dehumidifier.<key>) and the
+ * default power path are rewritten to the current key. A custom prefix,
+ * an empty power path, and the unsuffixed legacy D13 prefix are kept,
+ * except when prevKey is known: a custom prefix ending in .<prevKey>
+ * has that last segment replaced.
+ */
+function syncPathsToKey(paths, key, prevKey) {
+  const next = { ...(paths || {}) }
+  const prefix = String(next.prefix || '').replace(/\.+$/, '')
+  if (!prefix || AUTO_PREFIX_RE.test(prefix) || (prevKey && prefix === `${DEFAULT_PREFIX}.${prevKey}`)) {
+    next.prefix = `${DEFAULT_PREFIX}.${key}`
+  } else if (prevKey && prefix !== prevKey && prefix.endsWith(`.${prevKey}`)) {
+    next.prefix = prefix.slice(0, -prevKey.length) + key
+  } else {
+    next.prefix = prefix
+  }
+  const elec = next.electrical ? String(next.electrical) : ''
+  if (elec && (AUTO_ELECTRICAL_RE.test(elec) || (prevKey && elec === defaultElectrical(prevKey)))) {
+    next.electrical = defaultElectrical(key)
+  }
+  return next
 }
 
 /** A new device entry as Admin adds it after the AlecoAir login. */
@@ -124,7 +156,7 @@ function normalizeOverrides(raw) {
 
 function normalizeDevice(d = {}, index = 0) {
   const key = isValidKey(d.key) ? d.key : slugKey(d.key || d.name || d.tuyaId, `device${index + 1}`)
-  const paths = { ...defaultPaths(key), ...(d.paths || {}) }
+  const paths = syncPathsToKey({ ...defaultPaths(key), ...(d.paths || {}) }, key)
   const profile = d.profile === 'auto' || getProfile(d.profile) ? d.profile : 'auto'
   const prof = profile === 'auto' ? null : PROFILES[profile]
   return {
@@ -200,6 +232,8 @@ module.exports = {
   isLegacyOptions,
   readLegacyPluginConfig,
   defaultPaths,
+  defaultElectrical,
+  syncPathsToKey,
   newDevice,
   migrateLegacyOptions,
   normalizeDevice,

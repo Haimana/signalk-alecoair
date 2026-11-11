@@ -34,6 +34,35 @@
     }).join('')
   }
 
+  var DEFAULT_PREFIX = 'environment.inside.dehumidifier'
+  var AUTO_PREFIX_RE = /^environment\.inside\.dehumidifier\.[a-z0-9][a-z0-9_]{0,31}$/
+  var AUTO_ELECTRICAL_RE = /^electrical\.loads\.dehumidifier[A-Za-z0-9]*\.power$/
+
+  function defaultPrefix(key) {
+    return DEFAULT_PREFIX + '.' + key
+  }
+
+  function defaultElectrical(key) {
+    return 'electrical.loads.' + camelKey('dehumidifier ' + key) + '.power'
+  }
+
+  function syncPathsToKey(paths, key, prevKey) {
+    var next = Object.assign({}, paths || {})
+    var prefix = String(next.prefix || '').replace(/\.+$/, '')
+    if (!prefix || AUTO_PREFIX_RE.test(prefix) || (prevKey && prefix === DEFAULT_PREFIX + '.' + prevKey)) {
+      next.prefix = defaultPrefix(key)
+    } else if (prevKey && prefix !== prevKey && prefix.slice(-(prevKey.length + 1)) === '.' + prevKey) {
+      next.prefix = prefix.slice(0, prefix.length - prevKey.length) + key
+    } else if (prefix) {
+      next.prefix = prefix
+    }
+    var elec = next.electrical ? String(next.electrical) : ''
+    if (elec && (AUTO_ELECTRICAL_RE.test(elec) || (prevKey && elec === defaultElectrical(prevKey)))) {
+      next.electrical = defaultElectrical(key)
+    }
+    return next
+  }
+
   function uniqueKey(base, devices) {
     var used = {}
     devices.forEach(function (d) { used[d.key] = true })
@@ -73,8 +102,8 @@
       simulate: false,
       dpOverrides: {},
       paths: {
-        prefix: 'environment.inside.dehumidifier.' + key,
-        electrical: 'electrical.loads.' + camelKey('dehumidifier ' + key) + '.power',
+        prefix: defaultPrefix(key),
+        electrical: defaultElectrical(key),
         publishCabinHumidity: false,
         cabinHumidity: 'environment.inside.relativeHumidity'
       }
@@ -272,7 +301,14 @@
       var discovered = ((status.discovery && status.discovery.devices) || []).find(function (x) { return (x.id && x.id === d.tuyaId) || (x.configuredKey && x.configuredKey === d.key) })
       var state = st.state || {}
 
-      function set(field, value) { props.onChange(Object.assign({}, d, (function () { var o = {}; o[field] = value; return o })())) }
+      function set(field, value) {
+        var next = Object.assign({}, d)
+        next[field] = value
+        if (field === 'key' && value && value !== d.key) {
+          next.paths = syncPathsToKey(d.paths, value, d.key)
+        }
+        props.onChange(next)
+      }
       function setPath(field, value) { set('paths', Object.assign({}, d.paths, (function () { var o = {}; o[field] = value; return o })())) }
 
       var statusLine = !st.running
@@ -298,7 +334,7 @@
             h('button', { type: 'button', className: 'btn btn-outline-danger', onClick: props.onRemove }, 'Remove'))),
         h('div', { className: 'aa-grid' },
           h(Field, { label: 'Name' }, h(TextInput, { value: d.name, onChange: function (v) { set('name', v) } })),
-          h(Field, { label: 'Key (paths and API)', help: 'a-z, 0-9, _' }, h(TextInput, { value: d.key, onChange: function (v) { set('key', slugKey(v, '')) } })),
+          h(Field, { label: 'Key (paths and API)', help: 'a-z, 0-9, _; the Signal K path follows this key unless you set a custom prefix' }, h(TextInput, { value: d.key, onChange: function (v) { set('key', slugKey(v, '')) } })),
           h(Field, { label: 'Tuya device id', className: 'aa-full' }, h(TextInput, { value: d.tuyaId, readOnly: true })),
           h(Field, {
             label: 'LAN IP',
@@ -407,7 +443,7 @@
         d.simulate = true
         d.profile = 'traditio'
         d.model = 'D13'
-        d.paths.prefix = 'environment.inside.dehumidifier.' + key
+        d.paths.prefix = defaultPrefix(key)
         d.paths.electrical = ''
         setDraft(Object.assign({}, draft, { devices: draft.devices.concat([d]) }))
       }

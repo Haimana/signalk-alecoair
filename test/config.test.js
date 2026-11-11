@@ -10,7 +10,8 @@ const {
   normalizeOptions,
   newDevice,
   readLegacyPluginConfig,
-  serializeOptions
+  serializeOptions,
+  syncPathsToKey
 } = require('../plugin/config')
 const { tmpDir } = require('./helpers/fakes')
 
@@ -112,3 +113,56 @@ test('normalizes protocol, profile and overrides', () => {
   assert.equal(d.ip, '')
   assert.deepEqual(d.dpOverrides, { power: 1, fan: null })
 })
+
+test('normalize rewrites the default path prefix and power path to the current key', () => {
+  const [d] = normalizeOptions({
+    devices: [{
+      key: 'cabin',
+      tuyaId: 'x',
+      paths: {
+        prefix: 'environment.inside.dehumidifier.d13_traditio',
+        electrical: 'electrical.loads.dehumidifierD13Traditio.power'
+      }
+    }]
+  }).devices
+  assert.equal(d.paths.prefix, 'environment.inside.dehumidifier.cabin')
+  assert.equal(d.paths.electrical, 'electrical.loads.dehumidifierCabin.power')
+})
+
+test('normalize keeps a custom prefix and an empty power path', () => {
+  const [d] = normalizeOptions({
+    devices: [{
+      key: 'cabin',
+      tuyaId: 'x',
+      paths: { prefix: 'environment.inside.forward.unit', electrical: '' }
+    }]
+  }).devices
+  assert.equal(d.paths.prefix, 'environment.inside.forward.unit')
+  assert.equal(d.paths.electrical, '')
+})
+
+test('normalize keeps the unsuffixed legacy D13 prefix and power path', () => {
+  const [d] = normalizeOptions({
+    devices: [{
+      key: 'd13',
+      tuyaId: 'x',
+      paths: {
+        prefix: 'environment.inside.dehumidifier',
+        electrical: 'electrical.loads.alecoairD13.power'
+      }
+    }]
+  }).devices
+  assert.equal(d.paths.prefix, 'environment.inside.dehumidifier')
+  assert.equal(d.paths.electrical, 'electrical.loads.alecoairD13.power')
+})
+
+test('syncPathsToKey replaces the previous key in a custom prefix when the key changes', () => {
+  const paths = syncPathsToKey(
+    { prefix: 'environment.inside.forward.d13_traditio', electrical: 'electrical.loads.dehumidifierD13Traditio.power' },
+    'cabin',
+    'd13_traditio'
+  )
+  assert.equal(paths.prefix, 'environment.inside.forward.cabin')
+  assert.equal(paths.electrical, 'electrical.loads.dehumidifierCabin.power')
+})
+
