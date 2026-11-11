@@ -11,6 +11,8 @@ Signal K plugin and WebApp for AlecoAir Wi-Fi dehumidifiers over Tuya LAN: sever
 
 **Not included yet:** native widgets for SKIP and automations that drive a unit from another Signal K humidity path (or start a heater). Both are on the roadmap; the plugin today controls and monitors the units you configure.
 
+This plugin was developed with Grok Bot.
+
 
 ## Screenshots
 
@@ -204,6 +206,8 @@ Manual defaults: Manual + hygrostat, CO = continuous via target `25`, restart th
 - The AlecoAir sign-in (`plugin/alecoair.js`) talks to the AlecoAir/Tuya cloud over HTTPS the way the phone app does, using the app's public Tuya client id. If the vendor rotates it, sign-in breaks; LAN control keeps working with the keys already stored. The password is MD5-hashed and RSA-encrypted with a per-login key from the cloud before it is sent, and it is never stored or logged.
 
 ## Development
+
+This plugin was developed with Grok Bot.
 
 ```bash
 npm test
