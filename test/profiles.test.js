@@ -2,7 +2,7 @@
 
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
-const { PROFILES, resolveProfile, suggestProfile, listProfiles } = require('../plugin/profiles')
+const { PROFILES, resolveProfile, suggestProfile, listProfiles, setHiddenProfileIds, getProfile, profileForProductId } = require('../plugin/profiles')
 const { D13_DPS } = require('./helpers/fakes')
 
 test('only Traditio is verified', () => {
@@ -47,4 +47,21 @@ test('profile list for Admin carries no functions or regexes', () => {
   assert.ok(list.find((p) => p.id === 'traditio').models.some((m) => m.id === 'D13'))
   assert.doesNotThrow(() => JSON.parse(JSON.stringify(list)))
   assert.equal(JSON.stringify(list).includes('fingerprint'), false)
+})
+
+test('hiding Traditio makes the live D13 look like an unknown unit', () => {
+  setHiddenProfileIds(['traditio'])
+  try {
+    assert.equal(getProfile('traditio'), null)
+    assert.equal(profileForProductId('iodmvdwo1jjf8x5d'), null)
+    assert.equal(resolveProfile({ profile: 'auto', productId: 'iodmvdwo1jjf8x5d' }).profile.id, 'generic')
+    assert.equal(resolveProfile({ profile: 'traditio', productId: 'iodmvdwo1jjf8x5d' }).profile.id, 'generic')
+    assert.equal(suggestProfile(D13_DPS), null)
+    assert.equal(listProfiles().some((p) => p.id === 'traditio'), false)
+    assert.ok(listProfiles().some((p) => p.id === 'generic'))
+  } finally {
+    setHiddenProfileIds([])
+  }
+  assert.equal(resolveProfile({ profile: 'auto', productId: 'iodmvdwo1jjf8x5d' }).profile.id, 'traditio')
+  assert.equal(suggestProfile(D13_DPS), 'traditio')
 })

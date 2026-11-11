@@ -295,6 +295,7 @@
       var st = props.runtime || {}
       var status = props.status
       var inspectState = useState(false)
+      var reportErr = useState('')
       var profiles = status.profiles || []
       var profileId = d.profile === 'auto' ? (st.profile && st.profile.id) : d.profile
       var prof = profiles.find(function (p) { return p.id === profileId }) || null
@@ -331,7 +332,21 @@
             !st.hasLocalKey && !d.simulate ? h('div', { className: 'small text-danger' }, 'No local key stored for this device. Sign in to AlecoAir above.') : null),
           h('div', { className: 'btn-group btn-group-sm' },
             h('button', { type: 'button', className: 'btn btn-outline-secondary', onClick: function () { inspectState[1](!inspectState[0]) }, disabled: !st.running }, inspectState[0] ? 'Close inspector' : 'DP inspector'),
+            h('button', {
+              type: 'button',
+              className: 'btn btn-outline-secondary',
+              disabled: !st.running,
+              title: 'Opens a pre-filled GitHub issue in your browser. Review it, then submit from your own account. Keys, device ids, IPs and Signal K paths are left out.',
+              onClick: function () {
+                reportErr[1]('')
+                api('/setup/devices/' + encodeURIComponent(d.key) + '/report').then(function (r) {
+                  if (r && r.url) window.open(r.url, '_blank', 'noopener,noreferrer')
+                  else reportErr[1]('The report URL could not be built.')
+                }).catch(function (e) { reportErr[1](e.message) })
+              }
+            }, 'Report to GitHub'),
             h('button', { type: 'button', className: 'btn btn-outline-danger', onClick: props.onRemove }, 'Remove'))),
+        reportErr[0] ? h('div', { className: 'alert alert-warning py-1 small' }, reportErr[0]) : null,
         h('div', { className: 'aa-grid' },
           h(Field, { label: 'Name' }, h(TextInput, { value: d.name, onChange: function (v) { set('name', v) } })),
           h(Field, { label: 'Key (paths and API)', help: 'a-z, 0-9, _; the Signal K path follows this key unless you set a custom prefix' }, h(TextInput, { value: d.key, onChange: function (v) { set('key', slugKey(v, '')) } })),

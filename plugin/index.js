@@ -4,7 +4,9 @@ const fs = require('fs')
 const path = require('path')
 const { DeviceRuntime } = require('./runtime')
 const { DiscoveryService } = require('./discovery')
-const { ROLES, PROFILES, resolveProfile, suggestProfile, listProfiles } = require('./profiles')
+const { ROLES, PROFILES, resolveProfile, suggestProfile, listProfiles, profileForProductId } = require('./profiles')
+const { buildDeviceReport, assertSanitized } = require('./report')
+const pkg = require('../package.json')
 const { createCodec, metadata, notifications, stateToValues, skPaths } = require('./mapper')
 const { isLanIp } = require('./scan')
 const alecoair = require('./alecoair')
@@ -233,6 +235,45 @@ module.exports = function factory(app, injected = {}) {
       const diag = entry.runtime.getDiagnostics()
       res.json({ ...diag, suggestion: suggestProfile(diag.rawDps) })
     })
+
+    router.get('/setup/devices/:key/report', (req, res) => {
+      const cfg = options.devices.find((d) => d.key === req.params.key)
+      if (!cfg) return res.status(404).json({ error: `Device ${req.params.key} is not in the configuration.` })
+      ensureStore()
+      const entry = devices.get(req.params.key)
+      const diag = entry ? entry.runtime.getDiagnostics() : {}
+      const resolution = entry ? entry.resolution : resolveProfile(cfg)
+      const report = buildDeviceReport({
+        device: cfg,
+        profile: resolution.profile,
+        source: resolution.source,
+        suggestion: suggestProfile(diag.rawDps || {}),
+        rawDps: diag.rawDps,
+        reportedDps: diag.reportedDps,
+        map: diag.map,
+        protocol: diag.protocol || null,
+        connected: diag.connected,
+        lastError: diag.lastError,
+        pluginVersion: pkg.version,
+        signalkVersion: (app.config && app.config.version) || 'unknown',
+        nodeVersion: process.version
+      })
+      const forbidden = [
+        cfg.tuyaId,
+        cfg.ip,
+        cfg.paths && cfg.paths.prefix,
+        cfg.paths && cfg.paths.electrical,
+        storeLib.getLocalKey(store, cfg.tuyaId),
+        store && store.account && store.account.user,
+        diag.ip
+      ]
+      try {
+        assertSanitized(report, forbidden)
+      } catch {
+        return res.status(500).json({ error: 'The report could not be built without leaking a secret. Nothing was sent.' })
+      }
+      res.json(report)
+    })
   }
 
   plugin.getOpenApi = () => loadOpenApi()
@@ -258,7 +299,7 @@ module.exports = function factory(app, injected = {}) {
           ...storeLib.publicCloudDevice(d),
           dehumidifier: storeLib.looksLikeDehumidifier(d),
           configuredKey: configuredById.get(d.id) || null,
-          profileByProductId: (Object.values(PROFILES).find((p) => p.productIds.includes(d.productId)) || {}).id || null,
+          profileByProductId: (profileForProductId(d.productId) || {}).id || null,
           configuredProfile: configuredProfileById.get(d.id) || null
         }))
       },

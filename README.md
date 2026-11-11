@@ -75,6 +75,8 @@ Upgrading from an older checkout that used Python: the `.venv` folder and `requi
    - **Signal K path prefix** (default `environment.inside.dehumidifier.<key>`), the optional estimated power path and cabin humidity path. Leave the prefix on the default unless you need a custom path; a prefix you type yourself is kept, except that if it ended with the old key, that last segment is updated when the key changes.
 6. Click **Save configuration**. Saving restarts the plugin; each unit shows *Connected* once its LAN session is up.
 7. Optional: open **DP inspector** on a running unit to see its live datapoints and map unknown ones to roles (useful for unverified or `generic` units).
+8. Optional: **Report to GitHub** on a running unit opens a pre-filled issue on [Haimana/signalk-alecoair](https://github.com/Haimana/signalk-alecoair/issues/new). Review the title and the live datapoints, fill in *What works* and *What does not*, then submit from your own GitHub account. The plugin never posts the issue itself and never includes local keys, Tuya device ids, account details, LAN IPs or Signal K paths. The Tuya product id is included on purpose: it is how a new model is identified.
+
 
 Sign in again whenever you re-pair a unit in the AlecoAir app (re-pairing changes its local key), or when you have added a new unit in the app: it appears in the account table with **Add**, and units already configured keep their Name, Key and paths. **Forget account** drops the device list but keeps the keys of devices that are still configured. **Remove** deletes a unit from the configuration. **Add simulator** adds a fake unit for trying the plugin without hardware.
 
@@ -186,6 +188,8 @@ npm test
 ```
 
 Tests use `node --test` and need no hardware or account: fake Tuya LAN devices, the simulator, a fake Signal K app and a local fake of the AlecoAir cloud for the sign-in. Add a profile in `plugin/profiles.js`; mark it `verified: false` until it has been tested on a real unit. Reports and DP maps for the unverified profiles are welcome.
+
+To treat a known profile as unknown while testing a device report (for example Traditio), set `ALECOAIR_HIDE_PROFILES=traditio` or write the profile id in a `.hide-profiles` file at the plugin root. That file is gitignored; `generic` cannot be hidden. Do not delete the profile from `plugin/profiles.js` for this test.
 
 ## Limits
 

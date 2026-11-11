@@ -1,5 +1,8 @@
 'use strict'
 
+const fs = require('fs')
+const path = require('path')
+
 /**
  * Data-driven model profiles. The Tuya LAN transport is generic; a profile
  * only says which datapoint (DP) carries which role and how values are coded.
@@ -190,13 +193,57 @@ const PROFILES = {
   }
 }
 
+/**
+ * Profile ids hidden from auto-detect, fingerprint suggestions and the Admin
+ * list (generic is never hidden). Used to treat a known model as unknown while
+ * testing device reports. Set ALECOAIR_HIDE_PROFILES=traditio or write the
+ * ids, one per line, in a .hide-profiles file at the plugin root (gitignored).
+ */
+let hiddenIds = new Set()
+
+function parseHiddenIds(raw) {
+  return new Set(String(raw || '').split(/[\s,]+/).filter(Boolean))
+}
+
+function refreshHiddenProfiles() {
+  const ids = parseHiddenIds(process.env.ALECOAIR_HIDE_PROFILES)
+  try {
+    const extra = fs.readFileSync(path.join(__dirname, '..', '.hide-profiles'), 'utf8')
+    for (const id of parseHiddenIds(extra)) ids.add(id)
+  } catch {
+    // no file is the normal case
+  }
+  hiddenIds = ids
+  return hiddenIds
+}
+
+function setHiddenProfileIds(ids) {
+  hiddenIds = new Set(ids || [])
+  return hiddenIds
+}
+
+function isHiddenProfile(id) {
+  return Boolean(id) && id !== 'generic' && hiddenIds.has(id)
+}
+
+function visibleProfiles() {
+  const out = {}
+  for (const [id, profile] of Object.entries(PROFILES)) {
+    if (!isHiddenProfile(id)) out[id] = profile
+  }
+  return out
+}
+
+refreshHiddenProfiles()
+
 function getProfile(id) {
+  if (isHiddenProfile(id)) return null
   return Object.prototype.hasOwnProperty.call(PROFILES, id) ? PROFILES[id] : null
 }
 
 function profileForProductId(productId) {
   if (!productId) return null
-  return Object.values(PROFILES).find((p) => p.productIds.includes(String(productId))) || null
+  return Object.values(visibleProfiles()).find((p) => p.productIds.includes(String(productId))) || null
 }
 
 /**
@@ -222,7 +269,7 @@ function resolveProfile(device = {}) {
 function suggestProfile(dps = {}) {
   const ids = new Set(Object.keys(dps || {}).map(String))
   const hits = []
-  for (const profile of Object.values(PROFILES)) {
+  for (const profile of Object.values(visibleProfiles())) {
     const fp = profile.fingerprint
     if (!fp) continue
     if (!fp.dps.every((id) => ids.has(String(id)))) continue
@@ -241,7 +288,7 @@ function modelInfo(profile, model) {
 }
 
 function listProfiles() {
-  return Object.values(PROFILES).map((p) => ({
+  return Object.values(visibleProfiles()).map((p) => ({
     id: p.id,
     name: p.name,
     verified: p.verified,
@@ -264,5 +311,8 @@ module.exports = {
   resolveProfile,
   suggestProfile,
   modelInfo,
-  listProfiles
+  listProfiles,
+  refreshHiddenProfiles,
+  setHiddenProfileIds,
+  isHiddenProfile
 }
