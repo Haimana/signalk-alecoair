@@ -51,7 +51,7 @@ module.exports = function factory(app, injected = {}) {
   const plugin = {
     id: PLUGIN_ID,
     name: 'AlecoAir dehumidifiers',
-    description: 'AlecoAir Wi-Fi dehumidifiers over Tuya LAN: several units, model profiles, no cloud or Node-RED in the control path. Setup lives here in Plugin Config; the WebApp is for operating the units.',
+    description: 'AlecoAir Wi-Fi dehumidifiers over Tuya LAN: several units, model profiles, Node.js only, no cloud or Node-RED in the control path. Setup lives here in Plugin Config; the WebApp is for operating the units. Signal K paths follow each unit\'s Key.',
     start,
     stop,
     schema,

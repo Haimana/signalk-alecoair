@@ -69,14 +69,16 @@ Upgrading from an older checkout that used Python: the `.venv` folder and `requi
 3. The account's devices are listed with their product id and suggested profile. Click **Add** for each dehumidifier you want.
 4. Optional: **Scan LAN** to find the units on the network. Leave **LAN IP** empty to let the plugin find the unit at start, or fill it in: an IP set here always wins.
 5. For each unit, check:
-   - **Name** and **Key (paths and API)**;
+   - **Name** (a label only) and **Key (paths and API)** — Signal K paths and the REST API use this key. The path prefix and the default estimated power path follow the key whenever you change it and again when you Save, even if the key was first generated from the unit's name when you clicked Add;
    - **Model profile**: *Auto (by AlecoAir product id)* or a profile from the table below;
    - **Model (power estimate)**, if known;
-   - **Signal K path prefix** (default `environment.inside.dehumidifier.<key>`), the optional estimated power path and cabin humidity path.
+   - **Signal K path prefix** (default `environment.inside.dehumidifier.<key>`), the optional estimated power path and cabin humidity path. Leave the prefix on the default unless you need a custom path; a prefix you type yourself is kept, except that if it ended with the old key, that last segment is updated when the key changes.
 6. Click **Save configuration**. Saving restarts the plugin; each unit shows *Connected* once its LAN session is up.
 7. Optional: open **DP inspector** on a running unit to see its live datapoints and map unknown ones to roles (useful for unverified or `generic` units).
 
-Sign in again whenever you re-pair a unit in the AlecoAir app: re-pairing changes its local key. **Forget account** drops the device list but keeps the keys of devices that are still configured. **Remove** deletes a unit from the configuration. **Add simulator** adds a fake unit for trying the plugin without hardware.
+Sign in again whenever you re-pair a unit in the AlecoAir app (re-pairing changes its local key), or when you have added a new unit in the app: it appears in the account table with **Add**, and units already configured keep their Name, Key and paths. **Forget account** drops the device list but keeps the keys of devices that are still configured. **Remove** deletes a unit from the configuration. **Add simulator** adds a fake unit for trying the plugin without hardware.
+
+You can open Plugin Config and sign in even before the first Save; the setup panel works while the plugin is still unconfigured.
 
 Adding or removing units, credentials and profiles are only in Admin, never in the WebApp.
 
@@ -97,7 +99,7 @@ UI labels are in English.
 
 ## Signal K paths
 
-Each device has its own prefix. Units added in Admin default to `environment.inside.dehumidifier.<key>`. A unit migrated from `signalk-alecoair-d13` keeps `environment.inside.dehumidifier`, so existing dashboards keep working.
+Each device has its own prefix, taken from its **Key**, not from its Name. Units added in Admin default to `environment.inside.dehumidifier.<key>`. Changing the key in Plugin Config updates that prefix and the default estimated power path immediately and again on Save. A custom prefix is left as you typed it (if it ended with the previous key, only that last segment is replaced). A unit migrated from `signalk-alecoair-d13` keeps the unsuffixed `environment.inside.dehumidifier`, so existing dashboards keep working.
 
 Under the prefix, only paths the unit actually has are published:
 
