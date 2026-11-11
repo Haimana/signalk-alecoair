@@ -174,6 +174,34 @@ const PROFILES = {
     fingerprint: { dps: [1, 2, 4, 16, 19], mode: /^(manual|laundry|purify|sleep)$/i }
   },
 
+  'report-iodmvdwo': {
+    id: 'report-iodmvdwo',
+    name: 'Reported AlecoAir (GitHub issue #1)',
+    verified: false,
+    note: 'Drafted only from https://github.com/Haimana/signalk-alecoair/issues/1 (product id iodmvdwo1jjf8x5d). Roles are inferred from one live DP snapshot. Sleep, Continuous, fault bits, fan and the power nameplate are unknown. Child lock on DP 16 is a guess from a boolean false.',
+    sources: ['https://github.com/Haimana/signalk-alecoair/issues/1'],
+    productIds: ['iodmvdwo1jjf8x5d'],
+    models: {},
+    dps: {
+      power: 1,
+      targetHumidity: 2,
+      mode: 5,
+      humidity: 6,
+      childLock: 16,
+      timer: 17,
+      fault: 19
+    },
+    modes: [
+      { value: 'auto', raw: 'Manual', label: 'Manual' }
+    ],
+    continuous: null,
+    humidity: { min: 30, max: 80, step: 5 },
+    timer: { format: 'suffix-h', max: 24 },
+    fan: { low: 'low', high: 'high' },
+    fault: {},
+    fingerprint: { dps: [1, 2, 5, 6, 19], mode: /^manual$/i }
+  },
+
   generic: {
     id: 'generic',
     name: 'Generic Tuya dehumidifier (read-only until mapped)',
@@ -279,7 +307,9 @@ function suggestProfile(dps = {}) {
     }
     hits.push(profile.id)
   }
-  return hits.length === 1 ? hits[0] : (hits.length ? hits : null)
+  if (!hits.length) return null
+  const verified = hits.find((id) => PROFILES[id] && PROFILES[id].verified)
+  return verified || hits[0]
 }
 
 function modelInfo(profile, model) {
