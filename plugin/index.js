@@ -2,293 +2,304 @@
 
 const fs = require('fs')
 const path = require('path')
-const { D13, mergeDps, availableControls } = require('./profile')
 const { DeviceRuntime } = require('./runtime')
-const { metadata, notifications, stateToValues, skPaths } = require('./mapper')
-const { scanLan, isLanIp } = require('./scan')
-const smartlife = require('./smartlife')
+const { DiscoveryService } = require('./discovery')
+const { ROLES, PROFILES, resolveProfile, suggestProfile, listProfiles } = require('./profiles')
+const { createCodec, metadata, notifications, stateToValues, skPaths } = require('./mapper')
+const { isLanIp } = require('./scan')
 const alecoair = require('./alecoair')
-const {
-  loadStore,
-  saveStore,
-  findStoredDevice,
-  pickDehumidifier,
-  mergeSettings,
-  setupStatus
-} = require('./setup')
+const storeLib = require('./store')
+const config = require('./config')
 
-const PLUGIN_ID = 'signalk-alecoair-d13'
+const { PLUGIN_ID, PROTOCOLS } = config
 const OPENAPI = path.join(__dirname, '..', 'openapi.json')
 
 function loadOpenApi() {
   try {
     return JSON.parse(fs.readFileSync(OPENAPI, 'utf8'))
   } catch {
-    return { openapi: '3.0.0', info: { title: 'ALECOAIR D13', version: '1.0.0' } }
+    return { openapi: '3.0.0', info: { title: 'AlecoAir', version: '2.0.0' } }
   }
 }
 
-module.exports = function factory(app) {
-  let runtime = null
-  let onState = null
-  let settings = {}
-  let restartPlugin = null
-  let qrSession = null
+/** <configPath>/plugin-config-data, where Signal K keeps plugin options. */
+function resolveDataRoot(app, override) {
+  if (override) return override
+  if (app && app.config && app.config.configPath) return path.join(app.config.configPath, 'plugin-config-data')
+  if (app && typeof app.getDataDirPath === 'function') {
+    try {
+      return path.dirname(app.getDataDirPath())
+    } catch {
+      // fall through
+    }
+  }
+  return storeLib.defaultDataRoot()
+}
+
+module.exports = function factory(app, injected = {}) {
+  const deps = injected || {}
+  let options = config.normalizeOptions({})
+  let store = storeLib.emptyStore()
+  let dataRoot = null
+  let discovery = null
+  let migration = null
+  const devices = new Map()
+  const putPaths = new Set()
+  let running = false
 
   const plugin = {
     id: PLUGIN_ID,
-    name: 'ALECOAIR D13 Traditio',
+    name: 'AlecoAir dehumidifiers',
+    description: 'AlecoAir Wi-Fi dehumidifiers over Tuya LAN. Setup lives here in Plugin Config; the WebApp is for operating the units.',
     start,
     stop,
     schema,
     uiSchema
   }
 
+  function debug(msg) {
+    if (typeof app.debug === 'function') app.debug(msg)
+  }
+
+  function persistStore() {
+    try {
+      store = storeLib.saveStore(store, dataRoot)
+    } catch (err) {
+      app.error(`AlecoAir: could not write the store: ${err.message}`)
+    }
+  }
+
+  function savePluginOptions(next) {
+    return new Promise((resolve, reject) => {
+      if (typeof app.savePluginOptions !== 'function') return resolve()
+      app.savePluginOptions(next, (err) => (err ? reject(err) : resolve()))
+    })
+  }
+
+  function getEntry(key) {
+    if (key) return devices.get(key) || null
+    return devices.values().next().value || null
+  }
+
+  function deviceSummary(entry) {
+    const s = entry.runtime.getPublicState()
+    return {
+      key: entry.cfg.key,
+      name: entry.cfg.name,
+      connected: s.connected,
+      power: s.power,
+      humidity: s.humidity,
+      profile: s.profile,
+      model: s.model,
+      pathPrefix: entry.cfg.paths.prefix,
+      lastError: s.lastError
+    }
+  }
+
+  function withDevice(req, res) {
+    const entry = getEntry(req.params && req.params.key)
+    if (!entry) {
+      res.status(404).json({ error: devices.size ? `Unknown device: ${req.params.key}` : 'No device is configured. Set it up in Signal K Admin → Plugin Config → AlecoAir.' })
+      return null
+    }
+    return entry
+  }
+
   plugin.registerWithRouter = function registerWithRouter(router) {
     const read = typeof router.access === 'function' ? router.access('readonly') : router
     const write = typeof router.access === 'function' ? router.access('readwrite') : router
 
-    read.get('/state', (_req, res) => {
-      if (!runtime) return res.status(503).json({ error: 'Plugin is not running.' })
-      res.json({ ...runtime.getPublicState(), setup: setupStatus(settings) })
+    // ---- Usage API (WebApp, dashboards) ----
+    read.get('/devices', (_req, res) => {
+      res.json({ devices: [...devices.values()].map(deviceSummary) })
     })
 
-    read.get('/health', (_req, res) => {
-      const state = runtime ? runtime.getPublicState() : { connected: false }
-      res.json({
-        ok: Boolean(runtime),
-        model: D13.model,
-        connected: Boolean(state.connected),
-        lastError: state.lastError || null,
-        setup: setupStatus(settings)
-      })
+    read.get('/devices/:key/state', (req, res) => {
+      const entry = withDevice(req, res)
+      if (entry) res.json({ ...entry.runtime.getPublicState(), name: entry.cfg.name })
     })
 
-    read.get('/setup', (_req, res) => {
-      res.json({
-        ok: true,
-        qrPending: Boolean(qrSession),
-        ...setupStatus(settings)
-      })
-    })
-
-    write.post('/alecoair/login', async (req, res) => {
+    write.post('/devices/:key/command', async (req, res) => {
+      const entry = withDevice(req, res)
+      if (!entry) return
       try {
-        const listed = await alecoair.login(req.body || {})
-        if (!listed.ok) return res.status(400).json(listed)
-        persist({
-          smartlifeSession: { source: 'alecoair', token_info: { access_token: 'oem' } },
-          smartlifeDevices: listed.devices || []
-        })
-        const chosen = pickDehumidifier(listed.devices || [])
-        if (chosen && chosen.localKey) {
-          await adoptFromStore(chosen.id, { restart: false })
-          res.json({ ok: true, adopted: true, ...setupStatus(settings) })
-          if (typeof restartPlugin === 'function') setTimeout(() => restartPlugin(), 400)
-          return
-        }
-        res.json({ ok: true, adopted: false, ...setupStatus(settings) })
-      } catch (err) {
-        res.status(500).json({ error: err.message || String(err) })
-      }
-    })
-
-    write.post('/smartlife/qr', async (req, res) => {
-      try {
-        const userCode = (req.body && req.body.userCode) || ''
-        const started = await smartlife.startQr(userCode)
-        if (!started.ok) return res.status(400).json(started)
-        qrSession = { userCode: String(userCode).trim(), token: started.token }
-        res.json({
-          ok: true,
-          qrText: started.qrTexts && started.qrTexts.alecoair ? started.qrTexts.alecoair : started.qrText,
-          qrTexts: started.qrTexts || { smartlife: started.qrText }
-        })
-      } catch (err) {
-        res.status(500).json({ error: err.message || String(err) })
-      }
-    })
-
-    write.post('/smartlife/poll', async (_req, res) => {
-      if (!qrSession) {
-        const current = setupStatus(settings)
-        if (current.linked) return res.json({ ok: true, pending: false, ...current })
-        return res.json({ ok: false, pending: true })
-      }
-      try {
-        const polled = await smartlife.pollQr(qrSession.token, qrSession.userCode)
-        if (polled.error && polled.pending === false) return res.status(500).json(polled)
-        if (!polled.ok) return res.json({ ok: false, pending: true })
-
-        const session = polled.session
-        persist({ smartlifeSession: session, smartlifeDevices: [] })
-        qrSession = null
-        await refreshFromSession(session)
-        const chosen = pickDehumidifier(settings.smartlifeDevices || [])
-        if (chosen && chosen.localKey) {
-          await adoptFromStore(chosen.id)
-          return res.json({ ok: true, pending: false, adopted: true, ...setupStatus(settings) })
-        }
-        res.json({ ok: true, pending: false, adopted: false, ...setupStatus(settings) })
-      } catch (err) {
-        res.status(500).json({ error: err.message || String(err) })
-      }
-    })
-
-    write.post('/smartlife/unlink', async (_req, res) => {
-      try {
-        persist({
-          smartlifeSession: null,
-          smartlifeDevices: [],
-          deviceId: '',
-          localKey: '',
-          deviceName: ''
-        })
-        qrSession = null
-        res.json({ ok: true, ...setupStatus(settings) })
-      } catch (err) {
-        res.status(500).json({ error: err.message || String(err) })
-      }
-    })
-
-    write.post('/smartlife/refresh', async (_req, res) => {
-      try {
-        if (!settings.smartlifeSession) {
-          return res.status(400).json({ error: 'Smart Life is not linked yet. Generate the QR first.' })
-        }
-        await refreshFromSession(settings.smartlifeSession)
-        const chosen = pickDehumidifier(settings.smartlifeDevices || [])
-        if (chosen && chosen.localKey && !settings.localKey) {
-          await adoptFromStore(chosen.id)
-        }
-        res.json({ ok: true, ...setupStatus(settings) })
-      } catch (err) {
-        res.status(500).json({ error: err.message || String(err) })
-      }
-    })
-
-    write.post('/adopt', async (req, res) => {
-      try {
-        const id = (req.body && (req.body.id || req.body.deviceId)) || ''
-        await adoptFromStore(id)
-        res.json({ ok: true, ...setupStatus(settings) })
+        const next = await entry.runtime.command(req.body || {})
+        res.json({ ...next, name: entry.cfg.name })
       } catch (err) {
         res.status(400).json({ error: err.message || String(err) })
       }
+    })
+
+    // Backwards-compatible aliases for the first device.
+    read.get('/state', (req, res) => {
+      const entry = getEntry()
+      if (!entry) return res.status(503).json({ error: 'No device is configured.', devices: [] })
+      res.json({ ...entry.runtime.getPublicState(), name: entry.cfg.name })
     })
 
     write.post('/command', async (req, res) => {
-      if (!runtime) return res.status(503).json({ error: 'Plugin is not running.' })
+      const entry = getEntry()
+      if (!entry) return res.status(503).json({ error: 'No device is configured.' })
       try {
-        const next = await runtime.command(req.body || {})
-        res.json({ ...next, setup: setupStatus(settings) })
+        res.json(await entry.runtime.command(req.body || {}))
       } catch (err) {
         res.status(400).json({ error: err.message || String(err) })
       }
+    })
+
+    read.get('/health', (_req, res) => {
+      res.json({
+        ok: running,
+        plugin: PLUGIN_ID,
+        configured: options.devices.length,
+        devices: [...devices.values()].map(deviceSummary)
+      })
+    })
+
+    // ---- Setup API: admin only (registered without access(), so Signal K keeps its admin-only default) ----
+    router.get('/setup/status', (_req, res) => {
+      res.json(setupStatus())
+    })
+
+    router.get('/setup/profiles', (_req, res) => {
+      res.json({ profiles: listProfiles(), roles: ROLES })
+    })
+
+    router.post('/setup/login', async (req, res) => {
+      const body = req.body || {}
+      const region = body.region || options.account.region || 'eu'
+      try {
+        const login = deps.login || alecoair.login
+        const listed = await login({ ...body, region })
+        if (!listed || !listed.ok) return res.status(400).json({ error: (listed && listed.error) || 'AlecoAir login failed.' })
+        storeLib.setAccount(store, { source: 'alecoair', region, devices: listed.devices || [] })
+        persistStore()
+        res.json({ ok: true, ...setupStatus() })
+      } catch (err) {
+        res.status(500).json({ error: err.message || String(err) })
+      }
+    })
+
+    router.post('/setup/unlink', (_req, res) => {
+      storeLib.clearAccount(store, options.devices.map((d) => d.tuyaId).filter(Boolean))
+      persistStore()
+      res.json({ ok: true, ...setupStatus() })
+    })
+
+    router.post('/setup/discover', async (_req, res) => {
+      try {
+        await discovery.scan({ force: true })
+        res.json({ ok: true, discovery: discovery.snapshot() })
+      } catch (err) {
+        res.status(500).json({ error: err.message || String(err) })
+      }
+    })
+
+    router.get('/setup/devices/:key/dps', (req, res) => {
+      const entry = devices.get(req.params.key)
+      if (!entry) return res.status(404).json({ error: `Device ${req.params.key} is not running. Save the configuration first.` })
+      const diag = entry.runtime.getDiagnostics()
+      res.json({ ...diag, suggestion: suggestProfile(diag.rawDps) })
     })
   }
 
   plugin.getOpenApi = () => loadOpenApi()
 
-  async function resolveIp(device) {
-    const hinted = [device && device.ip, settings.ip].find(isLanIp)
-    if (hinted) return hinted
-    try {
-      const found = await scanLan({ timeoutMs: 4000 })
-      const byId = found.find((d) => d.id && d.id === device.id && isLanIp(d.ip))
-      if (byId) return byId.ip
-      const tcp = found.filter((d) => d.tcp && isLanIp(d.ip))
-      if (tcp.length === 1) return tcp[0].ip
-    } catch {
-      // IP stays empty; tuyapi can still try UDP find
-    }
-    return ''
-  }
-
-  async function refreshFromSession(session) {
-    let last = { ok: false, devices: [], error: 'Smart Life returned no devices.' }
-    for (let i = 0; i < 5; i++) {
-      last = await smartlife.listDevices(session)
-      if (last.ok && last.devices && last.devices.length) {
-        persist({ smartlifeSession: session, smartlifeDevices: last.devices })
-        return last
-      }
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-    }
-    persist({ smartlifeSession: session, smartlifeDevices: last.devices || [] })
-    return last
-  }
-
-  function persist(partial) {
-    const store = saveStore(partial)
-    settings = mergeSettings(settings, store)
-    return store
-  }
-
-  async function adoptFromStore(id, options = {}) {
-    const store = loadStore()
-    const device = findStoredDevice({ ...store, smartlifeDevices: settings.smartlifeDevices }, id)
-    if (!device || !device.id) throw new Error('Choose a device from the AlecoAir list.')
-    if (!device.localKey) throw new Error('AlecoAir did not return a local key for that device.')
-    const ip = await resolveIp(device)
-    persist({
-      deviceId: device.id,
-      localKey: device.localKey,
-      ip,
-      version: settings.version || D13.protocolDefault,
-      deviceName: device.name || device.productName || device.id
-    })
-    if (typeof app.savePluginOptions === 'function') {
-      const configuration = {
-        deviceId: settings.deviceId,
-        ip: settings.ip,
-        version: settings.version,
-        deviceName: settings.deviceName,
-        pathPrefix: settings.pathPrefix,
-        publishCabinHumidity: settings.publishCabinHumidity,
-        cabinHumidityPath: settings.cabinHumidityPath,
-        electricalPath: settings.electricalPath,
-        pollSeconds: settings.pollSeconds
-      }
-      await new Promise((resolve, reject) => {
-        app.savePluginOptions(configuration, (err) => err ? reject(err) : resolve())
+  function setupStatus() {
+    const configuredById = new Map(options.devices.filter((d) => d.tuyaId).map((d) => [d.tuyaId, d.key]))
+    const account = store.account || {}
+    return {
+      pluginId: PLUGIN_ID,
+      webappPath: `/${PLUGIN_ID}/`,
+      storeFile: storeLib.storePath(dataRoot),
+      migration,
+      account: {
+        linked: Boolean(account.linked),
+        source: account.source || null,
+        region: account.region || options.account.region,
+        linkedAt: account.linkedAt || null,
+        devices: (account.devices || []).map((d) => ({
+          ...storeLib.publicCloudDevice(d),
+          dehumidifier: storeLib.looksLikeDehumidifier(d),
+          configuredKey: configuredById.get(d.id) || null,
+          profileByProductId: (Object.values(PROFILES).find((p) => p.productIds.includes(d.productId)) || {}).id || null
+        }))
+      },
+      discovery: discovery ? discovery.snapshot() : null,
+      profiles: listProfiles(),
+      roles: ROLES,
+      protocols: PROTOCOLS,
+      devices: options.devices.map((d) => {
+        const entry = devices.get(d.key)
+        const learned = (store.devices || {})[d.tuyaId] || {}
+        const diag = entry ? entry.runtime.getDiagnostics() : null
+        return {
+          key: d.key,
+          name: d.name,
+          running: Boolean(entry),
+          problems: d.problems || [],
+          hasLocalKey: Boolean(storeLib.getLocalKey(store, d.tuyaId)),
+          profile: entry ? { id: entry.resolution.profile.id, source: entry.resolution.source, requested: entry.resolution.requested } : null,
+          suggestion: diag ? suggestProfile(diag.rawDps) : null,
+          learned: {
+            protocol: learned.protocol || null,
+            lastIp: learned.lastIp || null,
+            reportedDps: learned.reportedDps || []
+          },
+          state: entry ? entry.runtime.getPublicState() : null,
+          diagnostics: diag
+        }
       })
     }
-    if (options.restart !== false && typeof restartPlugin === 'function') restartPlugin()
   }
 
-  function start(options, restart) {
-    restartPlugin = restart
-    settings = mergeSettings(options || {}, loadStore())
-    const pathPrefix = settings.pathPrefix || 'environment.inside.dehumidifier'
-    runtime = new DeviceRuntime({
-      deviceId: settings.deviceId,
-      localKey: settings.localKey,
-      ip: settings.ip,
-      version: settings.version || D13.protocolDefault,
-      pollIntervalMs: (Number(settings.pollSeconds) || 8) * 1000,
-      dps: settings.dps,
-      autoScan: !isLanIp(settings.ip)
-    })
+  function publishMeta(entry) {
+    const caps = entry.runtime.caps
+    const sig = JSON.stringify(caps)
+    if (sig === entry.metaSig) return
+    entry.metaSig = sig
+    const meta = metadata(caps, metaOptions(entry))
+    app.handleMessage(plugin.id, { updates: [{ meta }] })
+  }
 
-    app.handleMessage(plugin.id, { updates: [{ meta: metadata({ pathPrefix }) }] })
-
-    const paths = skPaths(pathPrefix)
-    const controls = availableControls(mergeDps(settings.dps || {}))
-    const puts = {
-      [paths.power]: (value) => ({ power: value }),
-      [paths.mode]: (value) => ({ mode: value }),
-      [paths.targetHumidity]: (value) => ({ targetHumidity: value }),
-      [paths.childLock]: (value) => ({ childLock: value }),
-      [paths.timerHours]: (value) => ({ timerHours: value }),
-      [paths.sleep]: (value) => ({ sleep: value })
+  function metaOptions(entry) {
+    return {
+      pathPrefix: entry.cfg.paths.prefix,
+      displayName: entry.cfg.name,
+      humidityRange: entry.codec.humidity,
+      nameplate: entry.codec.nameplate,
+      simulate: entry.cfg.simulate
     }
-    if (controls.fan) puts[paths.fan] = (value) => ({ fan: value })
-    if (controls.insideDry) puts[paths.insideDry] = (value) => ({ insideDry: value })
+  }
 
-    for (const [skPath, toCommand] of Object.entries(puts)) {
-      app.registerPutHandler('vessels.self', skPath, (context, p, value, cb) => {
-        runtime.command(toCommand(value)).then(() => {
+  const PUT_COMMANDS = {
+    power: (v) => ({ power: v }),
+    mode: (v) => ({ mode: v }),
+    targetHumidity: (v) => ({ targetHumidity: v }),
+    fan: (v) => ({ fan: v }),
+    childLock: (v) => ({ childLock: v }),
+    timerHours: (v) => ({ timerHours: v }),
+    sleep: (v) => ({ sleep: v }),
+    insideDry: (v) => ({ insideDry: v })
+  }
+  const PUT_CONTROL = { power: 'power', mode: 'mode', targetHumidity: 'targetHumidity', fan: 'fan', childLock: 'childLock', timerHours: 'timer', sleep: 'sleep', insideDry: 'insideDry' }
+
+  function registerPuts(entry) {
+    if (typeof app.registerPutHandler !== 'function') return
+    const { controls } = entry.runtime.caps
+    const paths = skPaths(entry.cfg.paths.prefix)
+    for (const [name, toCommand] of Object.entries(PUT_COMMANDS)) {
+      if (!controls[PUT_CONTROL[name]]) continue
+      const skPath = paths[name]
+      if (putPaths.has(skPath)) continue
+      putPaths.add(skPath)
+      const key = entry.cfg.key
+      app.registerPutHandler('vessels.self', skPath, (_context, _p, value, cb) => {
+        const current = devices.get(key)
+        if (!current) {
+          return { state: 'COMPLETED', statusCode: 503, message: 'Device is not running.' }
+        }
+        current.runtime.command(toCommand(value)).then(() => {
           cb({ state: 'COMPLETED', statusCode: 200 })
         }).catch((err) => {
           cb({ state: 'COMPLETED', statusCode: 400, message: err.message })
@@ -296,105 +307,213 @@ module.exports = function factory(app) {
         return { state: 'PENDING' }
       })
     }
-
-    onState = (state) => {
-      const values = stateToValues(state, {
-        pathPrefix,
-        publishCabinHumidity: settings.publishCabinHumidity !== false,
-        cabinHumidityPath: settings.cabinHumidityPath || 'environment.inside.humidity',
-        electricalPath: settings.electricalPath || 'electrical.loads.alecoairD13.power'
-      })
-      app.handleMessage(plugin.id, {
-        updates: [{ values: values.concat(notifications(state)) }]
-      })
-      const status = settings.deviceId
-        ? (state.connected
-          ? `${state.power ? 'ON' : 'OFF'} · ${state.humidity}% RH · ${state.powerWatts} W`
-          : `disconnected${state.lastError ? ': ' + state.lastError : ''}`)
-        : 'Link Smart Life in the WebApp'
-      if (typeof app.setPluginStatus === 'function') app.setPluginStatus(status)
-    }
-
-    runtime.on('protocol', (version) => {
-      if (version && version !== settings.version) persist({ version })
-    })
-
-    runtime.on('discovered', (device) => {
-      if (!device || !device.ip || settings.ip) return
-      const extra = { ip: device.ip }
-      if (device.id && !settings.deviceId) extra.deviceId = device.id
-      if (device.version && !settings.version) extra.version = device.version
-      persist(extra)
-    })
-
-    runtime.on('state', onState)
-    runtime.on('warn', (err) => {
-      if (typeof app.debug === 'function') app.debug(err.message || String(err))
-    })
-    runtime.on('fault', (err) => {
-      app.error(err.message || String(err))
-      if (typeof app.setPluginError === 'function') app.setPluginError(err.message || String(err))
-    })
-
-    runtime.start().then(() => {
-      app.debug(`ALECOAIR D13 started (${settings.deviceId ? 'Tuya LAN' : 'waiting for setup'})`)
-    }).catch((err) => {
-      app.error(err.message || String(err))
-    })
   }
 
-  function stop() {
-    if (runtime && onState) runtime.off('state', onState)
-    if (runtime) return runtime.stop()
-    return Promise.resolve()
+  function updateStatus() {
+    if (typeof app.setPluginStatus !== 'function') return
+    if (!options.devices.length) {
+      app.setPluginStatus('No device yet: sign in to AlecoAir and add one in this plugin\'s configuration.')
+      return
+    }
+    const parts = options.devices.map((d) => {
+      const entry = devices.get(d.key)
+      if (!entry) return `${d.key}: ${d.problems && d.problems.length ? d.problems.join(', ') : 'disabled'}`
+      const s = entry.runtime.getPublicState()
+      if (!s.connected) return `${d.key}: disconnected${s.lastError ? ` (${s.lastError})` : ''}`
+      const rh = s.humidity === null ? '' : ` · ${s.humidity}% RH`
+      const w = s.powerWatts === null ? '' : ` · ${s.powerWatts} W`
+      return `${d.key}: ${s.power ? 'ON' : 'OFF'}${rh}${w}`
+    })
+    app.setPluginStatus(parts.join(' | '))
+  }
+
+  function startDevice(cfg, noIpCount) {
+    const resolution = resolveProfile(cfg)
+    const codec = createCodec(resolution.profile, cfg.dpOverrides, cfg.model)
+    const learned = (store.devices || {})[cfg.tuyaId] || {}
+    const Runtime = deps.DeviceRuntime || DeviceRuntime
+    const runtime = new Runtime({
+      key: cfg.key,
+      tuyaId: cfg.tuyaId,
+      localKey: storeLib.getLocalKey(store, cfg.tuyaId),
+      ip: cfg.ip,
+      protocol: cfg.protocol,
+      protocolHint: cfg.protocol === 'auto' ? learned.protocol : null,
+      codec,
+      reportedDps: learned.reportedDps || [],
+      pollIntervalMs: cfg.pollSeconds * 1000,
+      simulate: cfg.simulate
+    }, {
+      TuyaLanDevice: deps.TuyaLanDevice,
+      TuyAPI: deps.TuyAPI,
+      resolveIp: (tuyaId) => discovery.resolveIp(tuyaId, { allowSingleTcp: noIpCount === 1 })
+    })
+    const entry = { cfg, runtime, codec, resolution, metaSig: null }
+    devices.set(cfg.key, entry)
+
+    runtime.on('protocol', (version) => {
+      if (cfg.protocol === 'auto' && version && version !== learned.protocol) {
+        learned.protocol = version
+        storeLib.updateDevice(store, cfg.tuyaId, { protocol: version })
+        persistStore()
+      }
+    })
+    runtime.on('ip', (ip) => {
+      if (isLanIp(ip)) {
+        storeLib.updateDevice(store, cfg.tuyaId, { lastIp: ip })
+        persistStore()
+      }
+    })
+    runtime.on('capabilities', ({ reportedDps }) => {
+      if (!cfg.simulate) {
+        storeLib.updateDevice(store, cfg.tuyaId, { reportedDps })
+        persistStore()
+      }
+      publishMeta(entry)
+      registerPuts(entry)
+    })
+    runtime.on('state', () => {
+      if (devices.get(cfg.key) !== entry) return
+      const caps = runtime.caps
+      const values = stateToValues(runtime.state, caps, {
+        pathPrefix: cfg.paths.prefix,
+        publishCabinHumidity: cfg.paths.publishCabinHumidity,
+        cabinHumidityPath: cfg.paths.cabinHumidity,
+        electricalPath: cfg.paths.electrical,
+        simulate: cfg.simulate
+      })
+      const notes = notifications(runtime.state, caps, metaOptions(entry))
+      app.handleMessage(plugin.id, { updates: [{ values: values.concat(notes) }] })
+      updateStatus()
+    })
+    runtime.on('warn', (err) => debug(`${cfg.key}: ${err.message || String(err)}`))
+    runtime.on('fault', (err) => {
+      app.error(`${cfg.key}: ${err.message || String(err)}`)
+    })
+
+    publishMeta(entry)
+    registerPuts(entry)
+    runtime.start().then(() => {
+      debug(`${cfg.key} started (${cfg.simulate ? 'simulator' : 'Tuya LAN'}, profile ${codec.profile.id})`)
+    }).catch((err) => app.error(`${cfg.key}: ${err.message || String(err)}`))
+  }
+
+  /**
+   * Turn whatever Signal K hands us into v2 options:
+   * - v2 options are used as is;
+   * - flat signalk-alecoair-d13 options (e.g. a copied config file) are migrated;
+   * - empty options fall back to the old plugin's config file and store.
+   * The migrated options are saved without restarting the plugin.
+   */
+  async function prepareOptions(raw, legacyStoreRaw) {
+    const given = raw && typeof raw === 'object' ? raw : {}
+    if (Array.isArray(given.devices)) return { options: given, migrated: null }
+    const fromOptions = config.isLegacyOptions(given)
+    const legacyOptions = fromOptions ? given : config.readLegacyPluginConfig(dataRoot)
+    if (!legacyOptions && !(legacyStoreRaw && legacyStoreRaw.deviceId)) {
+      return { options: { ...config.normalizeOptions({}), ...given, devices: [] }, migrated: null }
+    }
+    const next = config.migrateLegacyOptions(legacyOptions || {}, legacyStoreRaw || {})
+    const source = fromOptions ? 'flat options' : (legacyOptions ? `${config.LEGACY_PLUGIN_ID}.json` : `${storeLib.LEGACY_STORE_NAME}`)
+    try {
+      await savePluginOptions(config.serializeOptions(config.normalizeOptions(next)))
+    } catch (err) {
+      app.error(`AlecoAir: could not save migrated options: ${err.message}`)
+    }
+    return { options: next, migrated: { from: source, at: Date.now(), devices: next.devices.map((d) => d.key) } }
+  }
+
+  function start(rawOptions) {
+    plugin.ready = startAsync(rawOptions).catch((err) => {
+      app.error(`AlecoAir failed to start: ${err.message || String(err)}`)
+      if (typeof app.setPluginError === 'function') app.setPluginError(err.message || String(err))
+    })
+    return plugin.ready
+  }
+
+  async function startAsync(rawOptions) {
+    running = true
+    dataRoot = resolveDataRoot(app, deps.dataRoot)
+    const loaded = storeLib.loadStore(dataRoot)
+    store = loaded.store
+    if (loaded.migrated) {
+      persistStore()
+      debug(`Migrated ${storeLib.LEGACY_STORE_NAME} to ${storeLib.STORE_NAME}`)
+    }
+    const prepared = await prepareOptions(rawOptions, loaded.legacyRaw)
+    if (!running) return
+    migration = prepared.migrated || (loaded.migrated ? { from: storeLib.LEGACY_STORE_NAME, at: Date.now(), devices: [] } : null)
+    options = config.normalizeOptions(prepared.options)
+    discovery = deps.discovery || new DiscoveryService({ subnets: options.discovery.subnets, scan: deps.scan })
+
+    const active = options.devices.filter((d) => d.enabled && !d.problems.length)
+    const noIpCount = active.filter((d) => !d.ip && !d.simulate).length
+    for (const cfg of active) startDevice(cfg, noIpCount)
+    updateStatus()
+  }
+
+  async function stop() {
+    running = false
+    const all = [...devices.values()]
+    devices.clear()
+    putPaths.clear()
+    await Promise.all(all.map((e) => e.runtime.stop()))
   }
 
   function schema() {
+    const profileIds = ['auto', ...Object.keys(PROFILES)]
+    const roleProps = {}
+    for (const role of ROLES) roleProps[role] = { type: ['integer', 'null'], title: role }
     return {
       type: 'object',
+      description: 'Use the AlecoAir setup panel above. This schema is the fallback form for Signal K servers without plugin configurators.',
       properties: {
-        deviceName: {
-          type: 'string',
-          title: 'Device name (set from the WebApp)'
+        configVersion: { type: 'number', title: 'Config version', default: 2 },
+        account: {
+          type: 'object',
+          title: 'AlecoAir account',
+          properties: {
+            region: { type: 'string', title: 'Tuya region', enum: ['eu', 'us', 'cn', 'in'], default: 'eu' }
+          }
         },
-        deviceId: {
-          type: 'string',
-          title: 'Tuya device ID (set from the WebApp)'
+        discovery: {
+          type: 'object',
+          title: 'LAN discovery',
+          properties: {
+            subnets: { type: 'array', title: 'Subnets to sweep on TCP 6668 (empty = local /24s)', items: { type: 'string' } }
+          }
         },
-        ip: {
-          type: 'string',
-          title: 'LAN IP'
-        },
-        version: {
-          type: 'string',
-          title: 'Tuya protocol version',
-          default: '3.5',
-          enum: ['3.3', '3.4', '3.5']
-        },
-        pathPrefix: {
-          type: 'string',
-          title: 'Signal K path prefix',
-          default: 'environment.inside.dehumidifier'
-        },
-        publishCabinHumidity: {
-          type: 'boolean',
-          title: 'Publish environment.inside.humidity',
-          default: true
-        },
-        cabinHumidityPath: {
-          type: 'string',
-          title: 'Cabin humidity path',
-          default: 'environment.inside.humidity'
-        },
-        electricalPath: {
-          type: 'string',
-          title: 'Electrical power path',
-          default: 'electrical.loads.alecoairD13.power'
-        },
-        pollSeconds: {
-          type: 'number',
-          title: 'Poll interval (s)',
-          default: 8
+        devices: {
+          type: 'array',
+          title: 'Dehumidifiers',
+          items: {
+            type: 'object',
+            required: ['key'],
+            properties: {
+              key: { type: 'string', title: 'Key (a-z, 0-9, _; used in paths and the API)' },
+              enabled: { type: 'boolean', title: 'Enabled', default: true },
+              name: { type: 'string', title: 'Name' },
+              tuyaId: { type: 'string', title: 'Tuya device id' },
+              productId: { type: 'string', title: 'Tuya product id (from the AlecoAir login)' },
+              ip: { type: 'string', title: 'LAN IP (empty = discover)' },
+              protocol: { type: 'string', title: 'Tuya protocol', enum: PROTOCOLS, default: 'auto' },
+              profile: { type: 'string', title: 'Model profile', enum: profileIds, default: 'auto' },
+              model: { type: 'string', title: 'Model (nameplate for the power estimate, e.g. D13)' },
+              pollSeconds: { type: 'number', title: 'Poll interval (s)', default: 8 },
+              simulate: { type: 'boolean', title: 'Simulator (no hardware)', default: false },
+              dpOverrides: { type: 'object', title: 'DP overrides (role → DP id, null removes)', properties: roleProps },
+              paths: {
+                type: 'object',
+                title: 'Signal K paths',
+                properties: {
+                  prefix: { type: 'string', title: 'Path prefix' },
+                  electrical: { type: 'string', title: 'Estimated power path (empty = off)' },
+                  publishCabinHumidity: { type: 'boolean', title: 'Also publish cabin humidity', default: false },
+                  cabinHumidity: { type: 'string', title: 'Cabin humidity path' }
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -402,9 +521,11 @@ module.exports = function factory(app) {
 
   function uiSchema() {
     return {
-      deviceId: { 'ui:readonly': true }
+      configVersion: { 'ui:widget': 'hidden' }
     }
   }
 
   return plugin
 }
+
+module.exports.resolveDataRoot = resolveDataRoot

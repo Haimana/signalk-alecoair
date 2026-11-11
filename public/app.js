@@ -1,108 +1,55 @@
 'use strict'
 
+/*
+ * AlecoAir usage WebApp: operate the configured dehumidifiers.
+ * Setup (account, discovery, adopting devices, DP inspector) lives only in
+ * Signal K Admin → Plugin Config → AlecoAir.
+ */
+
+const PLUGIN_ID = 'signalk-alecoair'
+const API = `/plugins/${PLUGIN_ID}`
 const $ = (id) => document.getElementById(id)
 
 const ui = {
+  title: $('title'),
+  subtitle: $('subtitle'),
+  switcher: $('switcher'),
   rh: $('rh'),
   arc: $('arc'),
   watts: $('watts'),
   tank: $('tank'),
+  tankLabel: $('tankLabel'),
   comp: $('comp'),
   conn: $('connPill'),
   modePill: $('modePill'),
-  sim: $('simPill'),
+  profilePill: $('profilePill'),
   banner: $('banner'),
   power: $('powerBtn'),
   powerLabel: $('powerLabel'),
+  modeSeg: $('modeSeg'),
   target: $('target'),
   targetLabel: $('targetLabel'),
   timer: $('timerValue'),
+  timerTitle: $('timerTitle'),
   lock: $('lockBtn'),
+  sleep: $('sleepBtn'),
   dry: $('dryBtn'),
   tankAlert: $('tankAlert'),
+  tankAlertText: $('tankAlertText'),
   defrostAlert: $('defrostAlert')
 }
 
-let apiBase = '/plugins/signalk-alecoair-d13'
+let devices = []
+let currentKey = null
 let state = null
 let busy = false
 let pendingCommand = null
 let hold = null
-let pollTimer = null
-let picking = false
-let qrWaiting = false
+let modeSig = ''
 
-function beginHold(body) {
-  hold = {
-    until: Date.now() + 8000,
-    fields: { ...(hold && hold.fields), ...body }
-  }
-}
-
-function clearHoldField(key, value) {
-  if (!hold || !hold.fields || hold.fields[key] === undefined) return
-  if (value !== undefined && Number(hold.fields[key]) !== Number(value) && hold.fields[key] !== value) return
-  delete hold.fields[key]
-  if (!Object.keys(hold.fields).length) hold = null
-}
-
-function applyHold(next) {
-  if (!hold || Date.now() > hold.until) {
-    hold = null
-    return next
-  }
-  const out = { ...next }
-  const f = hold.fields
-  if (f.targetHumidity !== undefined) {
-    if (Number(out.targetHumidity) === Number(f.targetHumidity)) clearHoldField('targetHumidity', f.targetHumidity)
-    else {
-      out.targetHumidity = Number(f.targetHumidity)
-      if (out.mode === 'continuous') out.mode = 'auto'
-      out.sleep = false
-    }
-  }
-  if (f.power !== undefined) {
-    if (Boolean(out.power) === Boolean(f.power)) clearHoldField('power', f.power)
-    else out.power = Boolean(f.power)
-  }
-  if (f.mode !== undefined) {
-    const wantSleep = f.mode === 'sleep'
-    const matched = wantSleep ? out.sleep : (!out.sleep && out.mode === f.mode)
-    if (matched) clearHoldField('mode', f.mode)
-    else {
-      out.mode = f.mode === 'sleep' ? 'auto' : f.mode
-      out.sleep = wantSleep
-    }
-  }
-  if (f.childLock !== undefined) {
-    if (Boolean(out.childLock) === Boolean(f.childLock)) clearHoldField('childLock', f.childLock)
-    else out.childLock = Boolean(f.childLock)
-  }
-  if (f.timerHours !== undefined) {
-    if (Number(out.timerHours) === Number(f.timerHours)) clearHoldField('timerHours', f.timerHours)
-    else out.timerHours = Number(f.timerHours)
-  }
-  return out
-}
-
-async function apiFetch(path, options = {}) {
-  return fetch(path, { credentials: 'include', cache: 'no-store', ...options })
-}
-
-async function resolveApi() {
-  const candidates = ['/plugins/signalk-alecoair-d13', '/api']
-  for (const base of candidates) {
-    try {
-      const res = await apiFetch(`${base}/health`)
-      if (res.ok) {
-        apiBase = base
-        return res.json()
-      }
-    } catch {
-      // try next
-    }
-  }
-  throw new Error('Signal K plugin API not found.')
+function show(id, visible) {
+  const el = typeof id === 'string' ? $(id) : id
+  if (el) el.hidden = !visible
 }
 
 function setBanner(text, kind) {
@@ -111,150 +58,28 @@ function setBanner(text, kind) {
   ui.banner.classList.toggle('error', kind === 'error')
 }
 
-function labelMode(mode, sleep) {
-  if (sleep) return 'Sleep'
-  if (mode === 'continuous') return 'Continuous'
-  return 'Auto'
+function beginHold(body) {
+  hold = { until: Date.now() + 8000, fields: { ...(hold && hold.fields), ...body } }
 }
 
-function attr(value) {
-  return String(value || '').replace(/[&<>"']/g, (ch) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  }[ch]))
+function applyHold(next) {
+  if (!hold || Date.now() > hold.until) {
+    hold = null
+    return next
+  }
+  const out = { ...next }
+  for (const [key, want] of Object.entries(hold.fields)) {
+    const have = key === 'targetHumidity' || key === 'timerHours' ? Number(out[key]) === Number(want) : out[key] === want
+    if (have) delete hold.fields[key]
+    else out[key] = want
+  }
+  if (hold.fields.targetHumidity !== undefined && out.mode === 'continuous') out.mode = ((out.modes || [])[0] || {}).value || 'auto'
+  if (!Object.keys(hold.fields).length) hold = null
+  return out
 }
 
-function show(id, visible) {
-  const el = $(id)
-  if (el) el.hidden = !visible
-}
-
-function renderSetup(setup) {
-  if (!setup) return
-  ui.sim.textContent = setup.ready && !picking ? 'Tuya LAN' : 'setup'
-  ui.sim.classList.toggle('ok', Boolean(setup.ready) && !picking)
-  ui.sim.classList.toggle('warn', !setup.ready || picking)
-
-  if (setup.ready && !picking && !setup.forcePick) {
-    show('setupReady', true)
-    show('setupLink', false)
-    show('setupDevices', false)
-    $('setupReadyText').textContent = `${setup.deviceName || setup.deviceId} · ${setup.ip || 'LAN'}`
-    return
-  }
-
-  show('setupReady', false)
-  if (setup.linked) {
-    show('setupLink', false)
-    show('setupDevices', true)
-    const hint = $('deviceHint')
-    if (!setup.devices || !setup.devices.length) {
-      hint.textContent = 'AlecoAir login succeeded, but no devices came back. Use Different account and the email/phone from the app that shows the D13.'
-    } else {
-      hint.textContent = 'The key is stored on the Signal K server. You never type it.'
-    }
-    renderDevices(setup.devices || [])
-    return
-  }
-  show('setupLink', true)
-  show('setupDevices', false)
-}
-
-function renderDevices(devices) {
-  const list = $('deviceList')
-  if (!devices || !devices.length) {
-    list.innerHTML = '<p style="color:var(--muted);margin:0">No devices in the Smart Life share list yet.</p>'
-    return
-  }
-  list.innerHTML = devices.map((d) => `
-    <div class="scan-item">
-      <div>
-        <b>${attr(d.name)}</b>
-        <small>${attr(d.ip || 'IP from LAN')} · ${d.online ? 'online' : 'offline'}${d.productName ? ' · ' + attr(d.productName) : ''}</small>
-      </div>
-      <button type="button" class="ghost" data-use="${attr(d.id)}">Use this device</button>
-    </div>
-  `).join('')
-  list.querySelectorAll('[data-use]').forEach((btn) => {
-    btn.addEventListener('click', () => adoptDevice(btn.dataset.use))
-  })
-}
-
-function render(next) {
-  next = applyHold(next)
-  state = next
-  const connected = Boolean(next.connected)
-  ui.conn.textContent = connected ? 'connected' : 'disconnected'
-  ui.conn.className = `pill ${connected ? 'ok' : 'alert'}`
-  ui.modePill.textContent = labelMode(next.mode, next.sleep)
-
-  const rh = Number(next.humidity)
-  ui.rh.textContent = Number.isFinite(rh) ? `${Math.round(rh)}%` : '—'
-  const circ = 2 * Math.PI * 78
-  const span = 240 / 360
-  const pct = Math.min(1, Math.max(0, (rh - 20) / 75))
-  ui.arc.setAttribute('stroke-dasharray', String(circ * span))
-  ui.arc.setAttribute('stroke-dashoffset', String(circ * span * (1 - pct)))
-  ui.arc.setAttribute('stroke', next.tankFull ? '#ff6b6b' : rh >= (next.targetHumidity || 50) + 1 ? '#3ee0c3' : '#7fd4ff')
-
-  ui.watts.textContent = `${Math.round(next.powerWatts || 0)} W`
-  ui.tank.textContent = next.tankFull ? 'FULL' : 'OK'
-  ui.comp.textContent = next.compressor ? 'ON' : 'OFF'
-
-  ui.power.classList.toggle('on', Boolean(next.power))
-  ui.power.textContent = next.power ? 'ON' : 'OFF'
-  ui.powerLabel.textContent = next.power
-    ? (next.compressor ? 'Compressor running, 13 L/day' : 'On, waiting for the hygrostat')
-    : 'Off'
-
-  const scrubbing = document.activeElement === ui.target
-  if (next.mode === 'continuous' && !(hold && hold.fields && hold.fields.targetHumidity !== undefined)) {
-    if (!scrubbing) ui.target.value = '30'
-    ui.targetLabel.textContent = 'CO'
-  } else if (!scrubbing) {
-    ui.target.value = String(next.targetHumidity || 50)
-    ui.targetLabel.textContent = `${next.targetHumidity || 50}%`
-  } else {
-    ui.targetLabel.textContent = `${ui.target.value}%`
-  }
-  ui.timer.textContent = `${next.timerHours || 0} h`
-  const left = Math.round(Number(next.timerRemainingMin) || 0)
-  if (left > 0) ui.timer.textContent = `${next.timerHours || 0} h · ${left} min`
-
-  document.querySelectorAll('#modeSeg [data-mode]').forEach((btn) => {
-    btn.classList.toggle('active', next.sleep ? btn.dataset.mode === 'sleep' : btn.dataset.mode === next.mode)
-  })
-  const controls = next.controls || {}
-  show('fanRow', Boolean(controls.fan))
-  show('dryBtn', Boolean(controls.insideDry))
-  document.querySelectorAll('#modeSeg [data-mode="sleep"]').forEach((btn) => {
-    btn.hidden = !controls.sleep
-  })
-  if (controls.fan) {
-    document.querySelectorAll('#fanSeg [data-fan]').forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.fan === next.fan)
-    })
-  }
-  ui.lock.textContent = next.childLock ? 'Child lock ON' : 'Child lock'
-  ui.dry.textContent = next.insideDry ? 'Inside dry ON' : 'Inside dry'
-  ui.tankAlert.classList.toggle('show', Boolean(next.tankFull))
-  ui.defrostAlert.classList.toggle('show', Boolean(next.defrost))
-
-  if (next.setup) renderSetup(picking ? { ...next.setup, forcePick: true } : next.setup)
-
-  const ready = Boolean(next.setup && next.setup.ready)
-  const linked = Boolean(next.setup && next.setup.linked)
-  if (qrWaiting) return
-  if (!ready && linked) {
-    setBanner((next.setup.devices && next.setup.devices.length)
-      ? 'AlecoAir is linked. Choose the dehumidifier.'
-      : 'AlecoAir is linked, but that account has no devices.', 'error')
-  } else if (!ready) setBanner('Sign in with the AlecoAir account that already shows the D13.', '')
-  else if (next.lastError && !connected) setBanner(next.lastError, 'error')
-  else if (!connected) {
-    const age = next.updatedAt ? Date.now() - Number(next.updatedAt) : Infinity
-    if (age < 60000 && next.rawDps && Object.keys(next.rawDps).length) setBanner('')
-    else setBanner('Device is not answering on the LAN yet.', 'error')
-  } else setBanner('')
+async function apiFetch(path, options = {}) {
+  return fetch(`${API}${path}`, { credentials: 'include', cache: 'no-store', ...options })
 }
 
 async function readJson(res) {
@@ -268,31 +93,168 @@ async function readJson(res) {
 
 function authError(res, data) {
   if (res.status === 401 || res.status === 403) {
-    return 'Signal K rejected the request (401). Open this page from the same host you used to log in, e.g. http://haimana.local:3000/signalk-alecoair-d13/'
+    return 'Signal K needs you to log in with write access. Log in on this server, then reload this page.'
   }
   return data.error || 'Request failed'
 }
 
+function attr(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch]))
+}
+
+function modeLabel(next) {
+  const m = (next.modes || []).find((x) => x.value === next.mode)
+  if (m) return m.label
+  return next.mode || '—'
+}
+
+function renderSwitcher() {
+  show(ui.switcher, devices.length > 1)
+  if (devices.length <= 1) return
+  ui.switcher.innerHTML = devices.map((d) => `
+    <button type="button" class="${d.key === currentKey ? 'active' : ''}" data-key="${attr(d.key)}">
+      <b>${attr(d.name)}</b>
+      <small>${d.connected ? (d.humidity === null || d.humidity === undefined ? 'connected' : `${d.humidity}% RH`) : 'offline'}${d.power ? ' · ON' : ''}</small>
+    </button>`).join('')
+  ui.switcher.querySelectorAll('[data-key]').forEach((btn) => {
+    btn.addEventListener('click', () => selectDevice(btn.dataset.key))
+  })
+}
+
+function renderModes(next) {
+  const modes = next.modes || []
+  const sig = modes.map((m) => m.value).join('|')
+  if (sig !== modeSig) {
+    modeSig = sig
+    ui.modeSeg.innerHTML = modes.map((m) => `<button type="button" data-mode="${attr(m.value)}">${attr(m.label)}</button>`).join('')
+    ui.modeSeg.querySelectorAll('[data-mode]').forEach((btn) => {
+      btn.addEventListener('click', () => command({ mode: btn.dataset.mode }))
+    })
+  }
+  ui.modeSeg.querySelectorAll('[data-mode]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.mode === next.mode)
+  })
+}
+
+function render(raw) {
+  const next = applyHold(raw)
+  state = next
+  const c = next.controls || {}
+  const s = next.sensors || {}
+  const connected = Boolean(next.connected)
+
+  ui.title.textContent = next.name || 'AlecoAir'
+  const plate = []
+  if (next.model) plate.push(next.model)
+  if (next.capacityLitersPerDay) plate.push(`${next.capacityLitersPerDay} L/day`)
+  if (next.ratedWatts) plate.push(`${next.ratedWatts} W`)
+  plate.push('local Tuya LAN')
+  ui.subtitle.textContent = plate.join(' · ')
+
+  ui.conn.textContent = next.simulate ? 'simulator' : (connected ? 'connected' : 'disconnected')
+  ui.conn.className = `pill ${connected ? 'ok' : 'alert'}`
+  ui.modePill.textContent = c.mode ? modeLabel(next) : '—'
+  ui.profilePill.textContent = next.profile ? `${next.profile.name}${next.profile.verified ? '' : ' (unverified)'}` : '—'
+  ui.profilePill.className = `pill ${next.profile && next.profile.verified ? '' : 'warn'}`
+
+  const rh = Number(next.humidity)
+  const hasRh = s.humidity && next.humidity !== null && Number.isFinite(rh)
+  ui.rh.textContent = hasRh ? `${Math.round(rh)}%` : '—'
+  const circ = 2 * Math.PI * 78
+  const span = 240 / 360
+  const pct = hasRh ? Math.min(1, Math.max(0, (rh - 20) / 75)) : 0
+  ui.arc.setAttribute('stroke-dasharray', String(circ * span))
+  ui.arc.setAttribute('stroke-dashoffset', String(circ * span * (1 - pct)))
+  ui.arc.setAttribute('stroke', next.tankFull ? '#ff6b6b' : rh >= (next.targetHumidity || 50) + 1 ? '#3ee0c3' : '#7fd4ff')
+
+  show('wattsStat', s.powerWatts)
+  ui.watts.textContent = `${Math.round(next.powerWatts || 0)} W`
+  show('tankStat', s.tankFull)
+  ui.tank.textContent = next.tankFull ? 'FULL' : 'OK'
+  ui.tankLabel.textContent = next.tankLitersMax ? `${next.tankLitersMax} L tank` : 'tank'
+  show('compStat', s.compressor)
+  ui.comp.textContent = next.compressor ? 'ON' : 'OFF'
+
+  show('powerRow', c.power)
+  ui.power.classList.toggle('on', Boolean(next.power))
+  ui.power.textContent = next.power ? 'ON' : 'OFF'
+  ui.powerLabel.textContent = next.power
+    ? (next.compressor ? 'Compressor running' : 'On, waiting for the hygrostat')
+    : 'Off'
+
+  show('modeBlock', c.mode)
+  if (c.mode) renderModes(next)
+
+  show('targetBlock', c.targetHumidity)
+  const range = next.humidityRange || { min: 30, max: 80, step: 5 }
+  ui.target.min = String(range.min)
+  ui.target.max = String(range.max)
+  ui.target.step = String(range.step)
+  const scrubbing = document.activeElement === ui.target
+  if (next.mode === 'continuous' && next.continuousTarget !== null && !(hold && hold.fields && hold.fields.targetHumidity !== undefined)) {
+    if (!scrubbing) ui.target.value = String(range.min)
+    ui.targetLabel.textContent = 'CO'
+  } else if (!scrubbing) {
+    ui.target.value = String(next.targetHumidity || 50)
+    ui.targetLabel.textContent = `${next.targetHumidity || 50}%`
+  } else {
+    ui.targetLabel.textContent = `${ui.target.value}%`
+  }
+
+  show('fanRow', c.fan)
+  document.querySelectorAll('#fanSeg [data-fan]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.fan === next.fan)
+  })
+
+  show('timerRow', c.timer)
+  ui.timerTitle.textContent = `Timer 0–${next.timerMaxHours || 24} h`
+  ui.timer.textContent = `${next.timerHours || 0} h`
+  const left = Math.round(Number(next.timerRemainingMin) || 0)
+  if (left > 0) ui.timer.textContent = `${next.timerHours || 0} h · ${left} min`
+
+  const sleepIsMode = (next.modes || []).some((m) => m.value === 'sleep')
+  show('lockBtn', c.childLock)
+  show('sleepBtn', c.sleep && !sleepIsMode)
+  show('dryBtn', c.insideDry)
+  show('toggleRow', c.childLock || (c.sleep && !sleepIsMode) || c.insideDry)
+  ui.lock.textContent = next.childLock ? 'Child lock ON' : 'Child lock'
+  ui.sleep.textContent = next.sleep ? 'Sleep ON' : 'Sleep'
+  ui.dry.textContent = next.insideDry ? 'Inside dry ON' : 'Inside dry'
+
+  ui.tankAlertText.textContent = `${next.tankLitersMax ? `The ${next.tankLitersMax} L tank` : 'The tank'} is full. The unit has stopped.`
+  ui.tankAlert.classList.toggle('show', Boolean(next.tankFull))
+  ui.defrostAlert.classList.toggle('show', Boolean(next.defrost))
+
+  if (next.lastError && !connected) setBanner(next.lastError, 'error')
+  else if (!connected) setBanner('The unit is not answering on the LAN yet.', 'error')
+  else if (next.profile && next.profile.id === 'generic') setBanner('This unit has no model profile yet, so it is read-only. Pick a profile in Signal K Admin → Plugin Config → AlecoAir.', '')
+  else setBanner('')
+}
+
 async function command(body) {
+  if (!currentKey) return
   beginHold(body)
-  if (state) render({ ...state, ...body })
+  if (state) render({ ...state })
   if (busy) {
     pendingCommand = { ...(pendingCommand || {}), ...body }
     return
   }
   busy = true
+  const key = currentKey
   try {
     let payload = body
     while (payload) {
       pendingCommand = null
-      const res = await apiFetch(`${apiBase}/command`, {
+      const res = await apiFetch(`/devices/${encodeURIComponent(key)}/command`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })
       const data = await readJson(res)
       if (!res.ok) throw new Error(authError(res, data))
-      render(data)
+      if (key === currentKey) render(data)
       payload = pendingCommand
     }
   } catch (err) {
@@ -303,137 +265,39 @@ async function command(body) {
   }
 }
 
-async function unlinkAccount() {
-  try {
-    const res = await apiFetch(`${apiBase}/smartlife/unlink`, { method: 'POST' })
-    const data = await readJson(res)
-    if (!res.ok) throw new Error(authError(res, data))
-    picking = false
-    qrWaiting = false
-    renderSetup(data)
-    setBanner('Previous account cleared. Sign in with the AlecoAir email or phone that already shows the D13.', '')
-  } catch (err) {
-    setBanner(err.message, 'error')
-  }
-}
-
-async function refreshDevices() {
-  $('deviceHint').textContent = 'Asking Smart Life for devices…'
-  try {
-    const res = await apiFetch(`${apiBase}/smartlife/refresh`, { method: 'POST' })
-    const data = await readJson(res)
-    if (!res.ok) throw new Error(authError(res, data))
-    picking = !data.ready
-    renderSetup(data)
-    setBanner(data.ready
-      ? 'Device saved. The plugin is connecting on the LAN.'
-      : (data.devices && data.devices.length
-        ? 'Smart Life is linked. Choose the dehumidifier.'
-        : 'Still no devices. Sign in with the AlecoAir account that shows the D13.'),
-    data.ready || (data.devices && data.devices.length) ? '' : 'error')
-  } catch (err) {
-    setBanner(err.message, 'error')
-  }
-}
-
-async function loadSetup() {
-  const res = await apiFetch(`${apiBase}/setup`)
+async function loadDevices() {
+  const res = await apiFetch('/devices')
   const data = await readJson(res)
-  if (res.ok) renderSetup(data)
-  return data
+  if (!res.ok) throw new Error(authError(res, data))
+  devices = data.devices || []
+  return devices
 }
 
-async function adoptDevice(id) {
-  try {
-    const res = await apiFetch(`${apiBase}/adopt`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id })
-    })
-    const data = await readJson(res)
-    if (!res.ok) throw new Error(authError(res, data))
-    picking = false
-    renderSetup(data)
-    setBanner('Device saved. The plugin is connecting on the LAN.', '')
-  } catch (err) {
-    setBanner(err.message, 'error')
-  }
+async function refreshState() {
+  if (!currentKey) return
+  const res = await apiFetch(`/devices/${encodeURIComponent(currentKey)}/state`)
+  if (res.ok) render(await res.json())
+  else if (res.status === 404 && !booting) await boot()
 }
 
-async function alecoLogin() {
-  const account = $('alecoAccount').value.trim()
-  const password = $('alecoPassword').value
-  if (!account || !password) {
-    setBanner('Enter the AlecoAir email/phone and password.', 'error')
-    return
-  }
-  setBanner('Signing in to AlecoAir…', '')
-  try {
-    const res = await apiFetch(`${apiBase}/alecoair/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account, password, region: 'eu' })
-    })
-    const data = await readJson(res)
-    if (!res.ok || !data.ok) throw new Error(authError(res, data))
-    picking = !data.ready
-    $('alecoPassword').value = ''
-    renderSetup(data)
-    setBanner(data.ready
-      ? 'D13 saved. The plugin is connecting on the LAN.'
-      : (data.devices && data.devices.length
-        ? 'AlecoAir is linked. Choose the dehumidifier.'
-        : 'AlecoAir login worked, but no devices were returned.'),
-    data.ready || (data.devices && data.devices.length) ? '' : 'error')
-  } catch (err) {
-    setBanner(err.message, 'error')
-  }
-}
-
-async function pollSmartLife() {
-  if (pollTimer) clearTimeout(pollTimer)
-  for (let i = 0; i < 50; i++) {
-    try {
-      const res = await apiFetch(`${apiBase}/smartlife/poll`, { method: 'POST' })
-      const data = await readJson(res)
-      if (res.status === 401 || res.status === 403) throw new Error(authError(res, data))
-      if (res.status >= 500) throw new Error(data.error || 'Smart Life poll failed.')
-      if (data.ok && (data.linked || data.ready)) {
-        qrWaiting = false
-        picking = !data.ready
-        $('qrBox').innerHTML = data.ready
-          ? '<p>Smart Life linked. Device saved.</p>'
-          : '<p>Smart Life linked.</p>'
-        renderSetup(data)
-        setBanner(data.ready
-          ? 'Device saved. The plugin is connecting on the LAN.'
-          : (data.devices && data.devices.length
-            ? 'Smart Life is linked. Choose the dehumidifier.'
-            : 'Smart Life is linked, but that account shared no devices.'),
-        data.ready || (data.devices && data.devices.length) ? '' : 'error')
-        return
-      }
-    } catch (err) {
-      qrWaiting = false
-      setBanner(err.message, 'error')
-      return
-    }
-    await new Promise((r) => { pollTimer = setTimeout(r, 2000) })
-  }
-  qrWaiting = false
-  setBanner('The QR code expired. Generate a new one and scan it immediately.', 'error')
+function selectDevice(key) {
+  currentKey = key
+  state = null
+  hold = null
+  pendingCommand = null
+  modeSig = ''
+  try { localStorage.setItem(`${PLUGIN_ID}.device`, key) } catch { /* private mode */ }
+  const url = new URL(window.location.href)
+  url.searchParams.set('device', key)
+  window.history.replaceState(null, '', url)
+  renderSwitcher()
+  refreshState().catch((err) => setBanner(err.message, 'error'))
 }
 
 function bind() {
   ui.power.addEventListener('click', () => command({ power: !(state && state.power) }))
-  document.querySelectorAll('#modeSeg [data-mode]').forEach((btn) => {
-    btn.addEventListener('click', () => command({ mode: btn.dataset.mode }))
-  })
   document.querySelectorAll('#fanSeg [data-fan]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      if (!(state && state.controls && state.controls.fan)) return
-      command({ fan: btn.dataset.fan })
-    })
+    btn.addEventListener('click', () => command({ fan: btn.dataset.fan }))
   })
   ui.target.addEventListener('pointerdown', () => beginHold({ targetHumidity: Number(ui.target.value) }))
   ui.target.addEventListener('input', () => {
@@ -443,50 +307,56 @@ function bind() {
   })
   ui.target.addEventListener('change', () => command({ targetHumidity: Number(ui.target.value) }))
   $('timerMinus').addEventListener('click', () => command({ timerHours: Math.max(0, (state?.timerHours || 0) - 1) }))
-  $('timerPlus').addEventListener('click', () => command({ timerHours: Math.min(24, (state?.timerHours || 0) + 1) }))
+  $('timerPlus').addEventListener('click', () => command({ timerHours: Math.min(state?.timerMaxHours || 24, (state?.timerHours || 0) + 1) }))
   ui.lock.addEventListener('click', () => command({ childLock: !(state && state.childLock) }))
-  ui.dry.addEventListener('click', () => {
-    if (!(state && state.controls && state.controls.insideDry)) return
-    command({ insideDry: !(state && state.insideDry) })
-  })
-  if ($('alecoLoginBtn')) $('alecoLoginBtn').addEventListener('click', alecoLogin)
-  $('refreshDevicesBtn').addEventListener('click', refreshDevices)
-  if ($('unlinkBtn')) $('unlinkBtn').addEventListener('click', unlinkAccount)
-  if ($('unlinkBtn2')) $('unlinkBtn2').addEventListener('click', unlinkAccount)
-  $('changeDeviceBtn').addEventListener('click', async () => {
-    picking = true
-    const setup = await loadSetup()
-    renderSetup({ ...setup, forcePick: true, linked: true })
-  })
+  ui.sleep.addEventListener('click', () => command({ sleep: !(state && state.sleep) }))
+  ui.dry.addEventListener('click', () => command({ insideDry: !(state && state.insideDry) }))
 }
 
-async function live() {
-  setInterval(async () => {
+let liveTimer = null
+let listTimer = null
+
+function live() {
+  if (liveTimer) return
+  liveTimer = setInterval(() => {
     if (document.hidden) return
-    try {
-      const res = await apiFetch(`${apiBase}/state`)
-      if (res.ok) render(await res.json())
-    } catch {
-      setBanner('Lost the connection to the plugin.', 'error')
-    }
+    refreshState().catch(() => setBanner('Lost the connection to the plugin.', 'error'))
   }, 2000)
+  listTimer = setInterval(() => {
+    if (document.hidden || devices.length < 2) return
+    loadDevices().then(renderSwitcher).catch(() => {})
+  }, 10000)
 }
+
+let booting = false
 
 async function boot() {
-  bind()
+  booting = true
   try {
-    const health = await resolveApi()
-    renderSetup(health.setup)
-    const res = await apiFetch(`${apiBase}/state`)
-    if (!res.ok) throw new Error('Device state is not available.')
-    render(await res.json())
-    live()
+    await loadDevices()
   } catch (err) {
-    setBanner(err.message, 'error')
+    booting = false
+    setBanner(err.message || 'Signal K plugin API not found. Is the AlecoAir plugin enabled?', 'error')
     ui.conn.textContent = 'error'
     ui.conn.className = 'pill alert'
-    ui.powerLabel.textContent = 'Cannot read state'
+    return
   }
+  show('emptyCard', devices.length === 0)
+  show('deviceView', devices.length > 0)
+  if (!devices.length) {
+    booting = false
+    setBanner('')
+    renderSwitcher()
+    return
+  }
+  const wanted = new URL(window.location.href).searchParams.get('device')
+  let saved = null
+  try { saved = localStorage.getItem(`${PLUGIN_ID}.device`) } catch { /* ignore */ }
+  const pick = [wanted, currentKey, saved].find((k) => k && devices.some((d) => d.key === k)) || devices[0].key
+  booting = false
+  selectDevice(pick)
+  live()
 }
 
+bind()
 boot()

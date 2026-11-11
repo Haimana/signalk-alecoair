@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ALECOAIR D13 Traditio</title>
+  <title>AlecoAir</title>
   <link rel="icon" href="./icon.svg">
   <link rel="stylesheet" href="./styles.css">
 </head>
@@ -13,57 +13,28 @@
       <div class="brand">
         <img src="./icon.svg" alt="">
         <div>
-          <h1>ALECOAIR D13 Traditio</h1>
-          <p>13 L/day · 170 W · local Tuya LAN · native Signal K</p>
+          <h1 id="title">AlecoAir</h1>
+          <p id="subtitle">Local Tuya LAN · native Signal K</p>
         </div>
       </div>
       <div class="pills">
         <span id="connPill" class="pill">connecting…</span>
         <span id="modePill" class="pill">—</span>
-        <span id="simPill" class="pill">LAN</span>
+        <span id="profilePill" class="pill">—</span>
       </div>
     </header>
 
+    <nav class="switcher" id="switcher" hidden></nav>
+
     <div id="banner" class="banner"></div>
 
-    <section class="card setup" id="setupCard">
-      <div id="setupReady" hidden>
-        <div class="row">
-          <div>
-            <h2>Device</h2>
-            <p id="setupReadyText" style="margin:6px 0 0;color:var(--muted)"></p>
-          </div>
-          <button type="button" class="ghost" id="changeDeviceBtn">Change device</button>
-          <button type="button" class="ghost" id="unlinkBtn">Different account</button>
-        </div>
-      </div>
-
-      <div id="setupLink">
-        <h2>Link AlecoAir</h2>
-        <p class="hint">Use the same email or phone and password as the AlecoAir app where the D13 already appears. Smart Life is not used.</p>
-        <div class="row">
-          <input id="alecoAccount" type="text" placeholder="AlecoAir email or phone" autocomplete="username">
-        </div>
-        <div class="row" style="margin-top:8px">
-          <input id="alecoPassword" type="password" placeholder="AlecoAir password" autocomplete="current-password">
-          <button type="button" class="ghost" id="alecoLoginBtn">Connect</button>
-        </div>
-      </div>
-
-      <div id="setupDevices" hidden>
-        <div class="row">
-          <div>
-            <h2>Choose the dehumidifier</h2>
-            <p id="deviceHint" class="hint">The key is stored on the Signal K server. You never type it.</p>
-          </div>
-          <button type="button" class="ghost" id="refreshDevicesBtn">Refresh devices</button>
-          <button type="button" class="ghost" id="unlinkBtn2">Different account</button>
-        </div>
-        <div id="deviceList" class="scan-list"></div>
-      </div>
+    <section class="card empty" id="emptyCard" hidden>
+      <h2>No dehumidifier configured</h2>
+      <p class="hint">Setup lives in Signal K Admin: <b>Server → Plugin Config → AlecoAir</b>. Sign in with your AlecoAir account there, then add the unit. This page is only for operating it.</p>
+      <a class="ghost link" id="adminLink" href="/admin/#/serverConfiguration/plugins/signalk-alecoair">Open AlecoAir in Plugin Config</a>
     </section>
 
-    <section class="grid">
+    <section class="grid" id="deviceView" hidden>
       <article class="card gauge-wrap">
         <div class="gauge">
           <svg viewBox="0 0 200 200" aria-hidden="true">
@@ -78,31 +49,27 @@
           </div>
         </div>
         <div class="stats">
-          <div class="stat"><b id="watts">— W</b><small>power</small></div>
-          <div class="stat"><b id="tank">—</b><small>2.3 L tank</small></div>
-          <div class="stat"><b id="comp">—</b><small>compressor</small></div>
+          <div class="stat" id="wattsStat"><b id="watts">— W</b><small>power (est.)</small></div>
+          <div class="stat" id="tankStat"><b id="tank">—</b><small id="tankLabel">tank</small></div>
+          <div class="stat" id="compStat"><b id="comp">—</b><small>compressor</small></div>
         </div>
       </article>
 
       <article class="card controls">
-        <div class="row">
+        <div class="row" id="powerRow">
           <div>
             <h2>Power</h2>
-            <p id="powerLabel" style="margin:6px 0 0;color:var(--muted)">Waiting for state…</p>
+            <p id="powerLabel" class="muted">Waiting for state…</p>
           </div>
           <button id="powerBtn" class="power" type="button">OFF</button>
         </div>
 
-        <div class="block">
+        <div class="block" id="modeBlock">
           <h2>Mode</h2>
-          <div class="seg" id="modeSeg">
-            <button type="button" data-mode="auto">Auto / hygrostat</button>
-            <button type="button" data-mode="continuous">Continuous (CO)</button>
-            <button type="button" data-mode="sleep">Sleep</button>
-          </div>
+          <div class="seg" id="modeSeg"></div>
         </div>
 
-        <div class="block">
+        <div class="block" id="targetBlock">
           <div class="target">
             <h2>Target humidity</h2>
             <b id="targetLabel">50%</b>
@@ -110,16 +77,16 @@
           <input id="target" class="slider" type="range" min="30" max="80" step="5" value="50">
         </div>
 
-        <div class="row" id="fanRow" hidden>
+        <div class="row" id="fanRow">
           <h2>Fan</h2>
           <div class="seg" id="fanSeg">
-            <button type="button" data-fan="low">Speed I</button>
-            <button type="button" data-fan="high">Speed II</button>
+            <button type="button" data-fan="low">Low</button>
+            <button type="button" data-fan="high">High</button>
           </div>
         </div>
 
-        <div class="row">
-          <h2>Timer 0–24 h</h2>
+        <div class="row" id="timerRow">
+          <h2 id="timerTitle">Timer</h2>
           <div class="seg">
             <button type="button" id="timerMinus">−</button>
             <button type="button" id="timerValue" class="active">0 h</button>
@@ -127,23 +94,22 @@
           </div>
         </div>
 
-        <div class="row">
+        <div class="row" id="toggleRow">
           <button type="button" class="ghost" id="lockBtn">Child lock</button>
-          <button type="button" class="ghost" id="dryBtn" hidden>Inside dry</button>
+          <button type="button" class="ghost" id="sleepBtn">Sleep</button>
+          <button type="button" class="ghost" id="dryBtn">Inside dry</button>
         </div>
 
         <div class="alerts">
-          <div id="tankAlert" class="alert">
-            <span>The 2.3 L tank is full. The unit has stopped.</span>
-          </div>
+          <div id="tankAlert" class="alert"><span id="tankAlertText">The tank is full. The unit has stopped.</span></div>
           <div id="defrostAlert" class="alert defrost">Automatic defrost in progress. The compressor is paused.</div>
         </div>
       </article>
     </section>
 
     <p class="footer">
-      Native Signal K plugin. After the one-time AlecoAir login, control stays on the boat LAN
-      (TCP 6668). No Node-RED, MQTT, or cloud in the command path.
+      Control stays on the boat LAN (Tuya TCP 6668). No Node-RED, MQTT, or cloud in the command path.
+      Setup and diagnostics: Signal K Admin → Plugin Config → AlecoAir.
     </p>
   </main>
   <script src="./app.js"></script>

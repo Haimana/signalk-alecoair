@@ -1,77 +1,83 @@
 {
-  "openapi": "3.0.3",
+  "openapi": "3.0.0",
   "info": {
-    "title": "ALECOAIR D13 Traditio",
-    "version": "1.0.0",
-    "description": "Native Signal K control and monitoring for the ALECOAIR D13 Traditio over Tuya LAN. No Node-RED."
+    "title": "AlecoAir dehumidifiers (signalk-alecoair)",
+    "version": "2.0.0",
+    "description": "Usage API for the WebApp and dashboards, plus the admin-only setup API used by the Plugin Config panel. Local keys are never returned."
   },
-  "servers": [
-    { "url": "/plugins/signalk-alecoair-d13" }
-  ],
+  "servers": [{ "url": "/plugins/signalk-alecoair" }],
   "paths": {
-    "/state": {
+    "/devices": {
+      "get": { "summary": "Configured, running devices", "responses": { "200": { "description": "{ devices: [{ key, name, connected, power, humidity, profile, model, pathPrefix, lastError }] }" } } }
+    },
+    "/devices/{key}/state": {
       "get": {
-        "summary": "Current device state",
-        "responses": {
-          "200": { "description": "D13 state plus setup status" }
-        }
+        "summary": "State, controls and capabilities of one device",
+        "parameters": [{ "name": "key", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Device state" }, "404": { "description": "Unknown device" } }
       }
     },
-    "/health": {
-      "get": {
-        "summary": "Connection health",
-        "responses": {
-          "200": { "description": "OK / disconnected" }
-        }
-      }
-    },
-    "/setup": {
-      "get": {
-        "summary": "Smart Life setup status and device list",
-        "responses": {
-          "200": { "description": "Link state, adopted device, public device list" }
-        }
-      }
-    },
-    "/smartlife/qr": {
+    "/devices/{key}/command": {
       "post": {
-        "summary": "Start Smart Life QR login",
-        "responses": {
-          "200": { "description": "QR payload" }
-        }
-      }
-    },
-    "/smartlife/poll": {
-      "post": {
-        "summary": "Poll QR login and persist the account plus device keys",
-        "responses": {
-          "200": { "description": "Pending, linked, or adopted" }
-        }
-      }
-    },
-    "/adopt": {
-      "post": {
-        "summary": "Use a device from the stored Smart Life list",
-        "responses": {
-          "200": { "description": "Device stored and plugin restarted" }
-        }
-      }
-    },
-    "/command": {
-      "post": {
-        "summary": "Send a command (power, mode, targetHumidity, fan, childLock, timerHours, sleep, insideDry)",
+        "summary": "Operate one device",
+        "description": "Only controls the device reports are accepted; DPs the device has not reported are never written.",
+        "parameters": [{ "name": "key", "in": "path", "required": true, "schema": { "type": "string" } }],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
-              "schema": { "type": "object" }
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "power": { "type": "boolean" },
+                  "mode": { "type": "string", "description": "One of the device's modes, e.g. auto | continuous | sleep" },
+                  "targetHumidity": { "type": "number", "description": "Percent (30–80) or ratio (0.3–0.8)" },
+                  "fan": { "type": "string", "enum": ["low", "high"] },
+                  "childLock": { "type": "boolean" },
+                  "timerHours": { "type": "integer", "minimum": 0, "maximum": 24 },
+                  "sleep": { "type": "boolean" },
+                  "insideDry": { "type": "boolean" }
+                }
+              }
             }
           }
         },
-        "responses": {
-          "200": { "description": "State after the command" },
-          "400": { "description": "Invalid command" }
-        }
+        "responses": { "200": { "description": "New state" }, "400": { "description": "Rejected command" } }
+      }
+    },
+    "/state": { "get": { "summary": "Deprecated alias: state of the first device", "responses": { "200": { "description": "Device state" } } } },
+    "/command": { "post": { "summary": "Deprecated alias: command the first device", "responses": { "200": { "description": "New state" } } } },
+    "/health": { "get": { "summary": "Plugin health", "responses": { "200": { "description": "{ ok, plugin, configured, devices }" } } } },
+    "/setup/status": { "get": { "summary": "Admin only: account, discovery, profiles and per-device diagnostics", "responses": { "200": { "description": "Setup status" } } } },
+    "/setup/profiles": { "get": { "summary": "Admin only: model profiles and DP roles", "responses": { "200": { "description": "{ profiles, roles }" } } } },
+    "/setup/login": {
+      "post": {
+        "summary": "Admin only: sign in to the AlecoAir account once and store each device's local key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["account", "password"],
+                "properties": {
+                  "account": { "type": "string", "description": "Email or phone" },
+                  "password": { "type": "string", "description": "Used once, never stored" },
+                  "region": { "type": "string", "enum": ["eu", "us", "cn", "in"] },
+                  "countryCode": { "type": "string", "description": "Phone login only, default 40" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Setup status with the account's devices (no keys)" }, "400": { "description": "Login failed" } }
+      }
+    },
+    "/setup/unlink": { "post": { "summary": "Admin only: forget the account list (keys of configured devices are kept)", "responses": { "200": { "description": "Setup status" } } } },
+    "/setup/discover": { "post": { "summary": "Admin only: run the shared LAN scan now", "responses": { "200": { "description": "{ discovery }" } } } },
+    "/setup/devices/{key}/dps": {
+      "get": {
+        "summary": "Admin only: DP inspector (raw DPs, reported DPs, effective map, profile suggestion)",
+        "parameters": [{ "name": "key", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Diagnostics" } }
       }
     }
   }

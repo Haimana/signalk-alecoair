@@ -11,7 +11,6 @@ const {
   missingKeyMessage,
   isLanIp
 } = require('../plugin/scan')
-const { DeviceRuntime } = require('../plugin/runtime')
 
 test('parses plaintext Tuya UDP JSON', () => {
   const buf = Buffer.from(JSON.stringify({
@@ -49,37 +48,6 @@ test('picks configured id, otherwise the only device', () => {
   assert.equal(pickDevice(devices.slice(0, 1), {}).id, 'aaa')
 })
 
-test('runtime scan fills id and ip before asking for localKey', async () => {
-  const runtime = new DeviceRuntime({
-    simulate: false,
-    autoScan: true,
-    localKey: ''
-  }, {
-    discover: async () => [{ id: 'bf12', ip: '172.22.22.50', version: '3.3' }]
-  })
-  await runtime.start()
-  const state = runtime.getPublicState()
-  assert.equal(state.connected, false)
-  assert.equal(state.adopted.deviceId, 'bf12')
-  assert.equal(state.adopted.ip, '172.22.22.50')
-  assert.equal(state.discovery.devices.length, 1)
-  assert.match(state.lastError, /Smart Life|WebApp/)
-  await runtime.stop()
-})
-
-test('LAN runtime without credentials reports a clear error', async () => {
-  const runtime = new DeviceRuntime({
-    simulate: false,
-    deviceId: '',
-    localKey: '',
-    autoScan: true
-  }, { discover: async () => [] })
-  await runtime.start()
-  assert.equal(runtime.getPublicState().connected, false)
-  assert.match(runtime.getPublicState().lastError || '', /Smart Life|Tuya|WebApp/)
-  await runtime.stop()
-})
-
 test('accepts discovery JSON without ip (filled later from UDP source)', () => {
   const device = parseDiscoveryPacket(Buffer.from(JSON.stringify({
     gwId: 'bfnoip',
@@ -105,5 +73,6 @@ test('rejects public WAN addresses as LAN IPs', () => {
 test('missing key message lists found devices', () => {
   const msg = missingKeyMessage([{ id: 'bf1234567890', ip: '172.22.22.9', version: '3.3' }])
   assert.match(msg, /172\.22\.22\.9/)
-  assert.match(msg, /Smart Life|WebApp/)
+  assert.match(msg, /Plugin Config/)
+  assert.doesNotMatch(msg, /Smart Life|WebApp/)
 })

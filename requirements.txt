@@ -1,2 +1,1 @@
-tuya-device-sharing-sdk>=0.2.15
-cryptography>=42
+requests

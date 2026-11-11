@@ -149,7 +149,7 @@ function scanLan(options = {}) {
 
     setTimeout(finish, timeoutMs)
   }).then(async (udpDevices) => {
-    const tcpHosts = await scanTcp6668({ timeoutMs: 250 })
+    const tcpHosts = await scanTcp6668({ timeoutMs: 250, prefixes: options.prefixes })
     return mergeScanResults(udpDevices, tcpHosts)
   })
 }
@@ -224,15 +224,14 @@ function mergeScanResults(udpDevices, tcpHosts) {
   return [...byIp.values()]
 }
 
-function missingKeyMessage(devices) {
-  if (!devices.length) {
-    return 'Link Smart Life in the WebApp (Me → scan icon, not +). The plugin stores the device key after that login.'
-  }
+function missingKeyMessage(devices = []) {
+  const hint = 'Open Signal K Admin → Server → Plugin Config → AlecoAir, sign in with the AlecoAir account and add this device.'
+  if (!devices.length) return `No local key for this device yet. ${hint}`
   const lines = devices.map((d) => {
     const id = d.id ? `${d.id.slice(0, 8)}…` : 'TCP 6668, no ID'
     return `${d.ip} · ${id}`
   })
-  return `Found ${devices.length} Tuya host(s) on the LAN. Finish Smart Life setup in the WebApp: ${lines.join('; ')}`
+  return `Found ${devices.length} Tuya host(s) on the LAN (${lines.join('; ')}), but this device has no local key. ${hint}`
 }
 
 module.exports = {

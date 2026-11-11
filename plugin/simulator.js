@@ -1,14 +1,21 @@
 'use strict'
 
-const { D13, MODE, FAN, FAULT } = require('./profile')
-const { emptyState, applyCommandToState } = require('./mapper')
+const { PROFILES } = require('./profiles')
+const { MODE, FAN } = require('./util')
+const { createCodec, emptyState, applyCommandToState } = require('./mapper')
+
+/** Nameplate used when the simulated profile has none (D13 Traditio figures). */
+const FALLBACK_PLATE = PROFILES.traditio.models.D13
 
 /**
- * Cabin-scale model of D13 Traditio: hygrostat +1% RH, 15 min sample cycle,
- * 13 L/day extraction at rated load, 2.3 L tank, 170 W compressor.
+ * Cabin-scale dehumidifier model for tests and demos: hygrostat +1% RH,
+ * 15 min sample cycle, extraction at the rated capacity, tank fill and a
+ * defrost cycle. Defaults to the D13 Traditio nameplate.
  */
-class D13Simulator {
+class Simulator {
   constructor(options = {}) {
+    this.codec = options.codec || createCodec(PROFILES.traditio, {}, 'D13')
+    this.plate = { ...FALLBACK_PLATE, ...(this.codec.nameplate || {}) }
     this.state = emptyState()
     this.state.connected = true
     this.state.humidity = options.humidity ?? 64
@@ -24,7 +31,7 @@ class D13Simulator {
   }
 
   command(command) {
-    this.state = applyCommandToState(this.state, command)
+    this.state = applyCommandToState(this.state, command, this.codec)
     this.refreshDerived()
     return this.getState()
   }
@@ -63,7 +70,6 @@ class D13Simulator {
     } else {
       this.state.compressor = false
       this.sampleTimer += dt
-      // Manual: after stop, fan samples 1 min every 15 min
       if (this.sampleTimer > 900) this.sampleTimer = 0
       this.ambientDrift(dt)
     }
@@ -81,15 +87,15 @@ class D13Simulator {
   }
 
   extract(dt) {
-    const fanFactor = this.state.fan === FAN.HIGH ? 1 : 0.74
-    const litersPerSecond = (D13.capacityLitersPerDay / 86400) * fanFactor
+    const fanFactor = this.state.fan === FAN.HIGH || !this.state.sleep ? 1 : 0.74
+    const litersPerSecond = (this.plate.capacityLitersPerDay / 86400) * fanFactor
     const extracted = litersPerSecond * dt
-    this.state.tankLiters = Math.min(D13.tankLiters, this.state.tankLiters + extracted)
+    this.state.tankLiters = Math.min(this.plate.tankLiters, this.state.tankLiters + extracted)
     const humidityDrop = (extracted / 0.012) * 0.018
     this.state.humidity = Math.max(22, this.state.humidity - humidityDrop)
-    if (this.state.tankLiters >= D13.tankLiters - 0.01) {
+    if (this.state.tankLiters >= this.plate.tankLiters - 0.01) {
       this.state.tankFull = true
-      this.state.tankLiters = D13.tankLiters
+      this.state.tankLiters = this.plate.tankLiters
       this.state.compressor = false
     }
   }
@@ -108,23 +114,24 @@ class D13Simulator {
   }
 
   refreshDerived() {
-    const faults = (this.state.tankFull ? FAULT.TANK_FULL : 0) | (this.state.defrost ? FAULT.DEFROST : 0)
-    this.state.faultCode = faults
+    const bits = this.codec.fault || {}
+    this.state.faultCode = (this.state.tankFull ? bits.tankFull || 0 : 0) | (this.state.defrost ? bits.defrost || 0 : 0)
+    const p = this.plate
     if (!this.state.power) {
       this.state.compressor = false
       this.state.powerWatts = 0
     } else if (this.state.tankFull) {
-      this.state.powerWatts = 2
+      this.state.powerWatts = p.tankFullWatts ?? 2
     } else if (this.state.defrost) {
-      this.state.powerWatts = 28
+      this.state.powerWatts = p.defrostWatts ?? 28
     } else if (this.state.compressor) {
-      this.state.powerWatts = this.state.fan === FAN.HIGH ? D13.ratedWatts : 145
+      this.state.powerWatts = this.state.sleep ? (p.sleepWatts ?? p.ratedWatts) : p.ratedWatts
     } else {
-      this.state.powerWatts = this.sampleTimer < 60 ? D13.idleWatts : 3
+      this.state.powerWatts = this.sampleTimer < 60 ? (p.idleWatts ?? 0) : 3
     }
     this.state.connected = true
     this.state.lastError = null
   }
 }
 
-module.exports = { D13Simulator }
+module.exports = { Simulator, D13Simulator: Simulator }
