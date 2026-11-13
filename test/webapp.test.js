@@ -78,7 +78,7 @@ test('accessibility and refresh: slider is keyboard-operable, targets are >= 44 
   assert.ok(/TARGET_DEBOUNCE_MS/.test(app) && /beginHold/.test(app), 'debounce and optimistic hold kept')
 })
 
-test('gauge: thin background arc and a thicker current-humidity arc (no dots); -/+ in the mode row; right column centred', () => {
+test('gauge: thin background arc and a thicker current-humidity arc (no dots); -/+ in their own column; right column centred', () => {
   assert.ok(/class="ring"[\s\S]*class="readout"/.test(tpl), 'values in the centre of the gauge')
   assert.ok(/data-r="arcBg"[\s\S]*data-r="arcFill"[\s\S]*data-r="knob"/.test(tpl), 'background arc, then humidity arc, then the knob on top')
   assert.equal(/class="dot|DOTS_PER_STEP|data-r="dots"/.test(tpl + app), false, 'no dots any more')
@@ -86,11 +86,13 @@ test('gauge: thin background arc and a thicker current-humidity arc (no dots); -
   const fg = css.match(/\.ring \.arc-fill \{[^}]*stroke-width: ([\d.]+)/)
   assert.ok(bg && fg && Number(fg[1]) > Number(bg[1]) * 2, 'humidity arc is clearly thicker')
   assert.ok(/arcPoint\(/.test(app) && /sweep: 270/.test(app) && /Math\.atan2/.test(app), 'tap or drag on the 270-degree arc sets the target')
-  assert.ok(/class="mode-row"[\s\S]*class="steppers"[\s\S]*data-r="minus"[\s\S]*data-r="plus"[\s\S]*data-r="modes"/.test(tpl), '-/+ in the same row as the modes')
-  assert.equal(/class="dial"[^]*?data-r="minus"[^]*?class="side"/.test(tpl), false, '-/+ are not on the gauge')
+  assert.ok(/class="dial"[\s\S]*class="steppers"[\s\S]*data-r="minus"[\s\S]*data-r="plus"[\s\S]*class="side"[\s\S]*data-r="modes"/.test(tpl), 'three columns: gauge, -/+, modes + status')
+  assert.equal(/mode-row/.test(tpl + css), false, '-/+ no longer in the mode row')
+  assert.ok(/\.steppers \{[^}]*flex-direction: column[^}]*justify-content: center/.test(css) && /\.step-plus \{ order: -1; \}/.test(css), 'desktop: stacked, + on top, centred on the gauge')
+  assert.equal(/data-r="minus"/.test(tpl.slice(tpl.indexOf('class="dial"'), tpl.indexOf('class="steppers"'))), false, '-/+ are not on the gauge')
   assert.ok(/<symbol id="i-minus" viewBox="0 0 24 24"><path [^>]*\/><\/symbol>/.test(html), 'bare minus glyph')
   assert.ok(/\.step \{[^}]*min-width: 64px;[^}]*min-height: 48px/.test(css), '-/+ sized like the mode buttons')
-  assert.ok(/@media \(max-width: 760px\)[\s\S]*\.mode-row \{ flex-direction: column/.test(css), 'phone: -/+ on their own row above the modes')
+  assert.ok(/@media \(max-width: 760px\)[\s\S]*\.steppers \{ flex-direction: row/.test(css), 'phone: -/+ side by side on their own row above the modes')
   assert.ok(/\.side \{[^}]*align-items: center/.test(css) && /\.modes \{[^}]*justify-content: center/.test(css) && /\.status \{[^}]*justify-content: center/.test(css), 'modes and status centred')
   const dim = css.match(/--dim: rgba\(255, 255, 255, (0\.\d+)\)/)
   assert.ok(dim && Number(dim[1]) >= 0.35, 'unlit elements are clearly visible')

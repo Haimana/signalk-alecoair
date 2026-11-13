@@ -152,7 +152,7 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   flex: 1 1 auto;
   display: flex;
   align-items: center;
-  gap: 40px;
+  gap: 56px;
   min-height: 0;
   padding: 0 0 4px 44px; /* with the panel padding: ~76 px before the gauge */
 }
@@ -249,14 +249,16 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
 .end-min { left: 19.5%; transform: translateX(-50%); }
 .end-max { left: 80.5%; transform: translateX(-50%); }
 
-.mode-row { display: flex; align-items: flex-start; justify-content: center; flex-wrap: wrap; gap: 6px 0; }
+/* Desktop: − / + stacked (+ on top) in their own column, centred on the gauge. */
 .steppers {
+  flex: 0 0 auto;
   display: flex;
-  align-items: flex-start;
-  margin-right: 12px;
-  padding-right: 12px;
-  border-right: 1px solid rgba(255,255,255,0.12);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
 }
+.step-plus { order: -1; }
 /* − / +: same size and look as the mode buttons, glyph only. */
 .step {
   min-width: 64px;
@@ -387,8 +389,8 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   .panel { width: 100%; min-height: 0; border-radius: 24px; padding: 18px 18px 20px; }
   .name { font-size: 11px; letter-spacing: 0.2em; }
   .panel-main { flex-direction: column; align-items: stretch; gap: 10px; padding: 4px 0 0; }
-  .mode-row { flex-direction: column; align-items: center; gap: 10px; width: 100%; }
-  .steppers { margin: 0; padding: 0; border-right: none; gap: 24px; }
+  .steppers { flex-direction: row; gap: 24px; }
+  .step-plus { order: 0; }
   .dial { justify-content: center; }
   .ring { width: min(244px, calc(100vw - 150px)); height: min(244px, calc(100vw - 150px)); }
   .side { align-items: center; gap: 16px; padding: 0; }

@@ -77,14 +77,13 @@
             </div>
           </div>
 
+          <div class="steppers" role="group" aria-label="Target humidity">
+            <button type="button" class="step step-minus" data-r="minus" aria-label="Lower target humidity"><svg aria-hidden="true"><use href="#i-minus"></use></svg></button>
+            <button type="button" class="step step-plus" data-r="plus" aria-label="Raise target humidity"><svg aria-hidden="true"><use href="#i-plus"></use></svg></button>
+          </div>
+
           <div class="side">
-            <div class="mode-row">
-              <div class="steppers" role="group" aria-label="Target humidity">
-                <button type="button" class="step" data-r="minus" aria-label="Lower target humidity"><svg aria-hidden="true"><use href="#i-minus"></use></svg></button>
-                <button type="button" class="step" data-r="plus" aria-label="Raise target humidity"><svg aria-hidden="true"><use href="#i-plus"></use></svg></button>
-              </div>
-              <div class="modes" data-r="modes" role="radiogroup" aria-label="Working mode"></div>
-            </div>
+            <div class="modes" data-r="modes" role="radiogroup" aria-label="Working mode"></div>
           <div class="extras">
             <div class="fan" data-r="fan" role="radiogroup" aria-label="Fan speed" hidden>
               <button type="button" class="fan-btn" data-fan="low" role="radio" aria-checked="false" aria-label="Fan low"><svg aria-hidden="true"><use href="#i-fan-low"></use></svg><span class="lbl">Low</span></button>
