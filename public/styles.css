@@ -161,8 +161,7 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
    and does not widen the column (width 0 + min-width 100%). */
 .dial { margin-right: 64px; }
 .steppers { margin-right: 38px; }
-.side > .extras, .side > .msg { width: 0; min-width: 100%; }
-.msg { text-align: center; }
+.side > .extras { width: 0; min-width: 100%; }
 
 .dial { position: relative; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
 .ring {
@@ -290,22 +289,57 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   justify-content: center;
   gap: 22px;
   padding: 8px 0;
+  position: relative;
 }
 
-/* ——— One restrained message line ——— */
+/* ——— Message slot: never moves the layout ———
+   Card: desktop = one line overlaid at the bottom of the right column (in its
+   free space), ellipsis, full text in the tooltip; phone = a fixed 2-line slot.
+   Page banner: a fixed toast pill over the cards. Both fade in and out. */
 .msg {
-  display: none;
-  min-height: 0;
   font-size: 11px;
   font-weight: 400;
   letter-spacing: 0.06em;
   color: var(--mid);
   line-height: 1.4;
-  padding: 2px 0 6px;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.35s ease;
 }
-.msg.show { display: block; }
+.msg.show { opacity: 1; pointer-events: auto; }
 .msg.alert { color: var(--red); }
-.page-msg { width: 1120px; max-width: 100%; text-align: center; }
+.side > .msg {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: 560px;
+  max-width: 560px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.page-msg {
+  position: fixed;
+  z-index: 50;
+  top: max(14px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translate(-50%, -6px);
+  max-width: min(560px, calc(100vw - 28px));
+  padding: 10px 20px;
+  border-radius: 999px;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: linear-gradient(165deg, rgba(24,25,31,0.94) 0%, rgba(10,11,14,0.94) 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.18), 0 0 0 1px rgba(190, 205, 225, 0.16), 0 14px 40px rgba(0,0,0,0.6);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+.page-msg.show { transform: translate(-50%, 0); }
 
 /* ——— Modes (top right) and status (below) ——— */
 .modes { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 6px 4px; min-width: 0; }
@@ -398,7 +432,19 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   .steppers { flex-direction: row; gap: 24px; margin-right: 0; }
   .dial { margin-right: 0; }
   .side { flex: 1 1 auto; }
-  .side > .extras, .side > .msg { width: 100%; min-width: 0; }
+  .side > .extras { width: 100%; min-width: 0; }
+  /* Phone: a fixed 2-line slot under the status icons, always reserved. */
+  .side > .msg {
+    position: static;
+    transform: none;
+    width: 100%;
+    max-width: none;
+    height: calc(2 * 1.4em);
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
   .step-plus { order: 0; }
   .dial { justify-content: center; }
   .ring { width: min(244px, calc(100vw - 150px)); height: min(244px, calc(100vw - 150px)); }
@@ -407,6 +453,5 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   .mode { min-width: 72px; }
   .extras { justify-content: center; width: 100%; }
   .status { justify-content: center; }
-  .msg { text-align: center; }
   .fan { width: 100%; justify-content: center; margin: 0 0 6px; padding: 0; border-right: none; }
 }

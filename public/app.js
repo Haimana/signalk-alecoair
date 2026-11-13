@@ -58,10 +58,23 @@ function show(el, visible) {
   if (el) el.hidden = !visible
 }
 
+/**
+ * Message slot: always in the layout (or an overlay), so showing a message
+ * never moves anything. It fades; the last text stays during the fade-out.
+ * Long text is cut with an ellipsis; the full text is in the tooltip.
+ */
 function setMsg(el, text, kind) {
-  if (el.textContent !== (text || '')) el.textContent = text || ''
-  el.classList.toggle('show', Boolean(text))
-  el.classList.toggle('alert', kind === 'alert')
+  const t = text || ''
+  if (t) {
+    if (el.textContent !== t) el.textContent = t
+    el.title = t
+    el.classList.toggle('alert', kind === 'alert')
+    el.removeAttribute('aria-hidden')
+  } else {
+    el.removeAttribute('title')
+    el.setAttribute('aria-hidden', 'true')
+  }
+  el.classList.toggle('show', Boolean(t))
 }
 
 async function apiFetch(path, options = {}) {
@@ -604,6 +617,12 @@ class DeviceView {
     const res = await apiFetch(`/devices/${encodeURIComponent(this.key)}/state`)
     if (res.ok) this.render(await res.json())
     else if (res.status === 404) return 'gone'
+    else {
+      // Any other HTTP error (500, 502, 401…) counts as a failed refresh, like a network error.
+      const err = new Error(authError(res, await readJson(res)))
+      err.status = res.status
+      throw err
+    }
     return 'ok'
   }
 }
@@ -637,10 +656,11 @@ async function refreshAll() {
   if (refreshing) return
   refreshing = true
   try {
-    const results = await Promise.all([...views.values()].map((v) => v.refresh().catch(() => 'error')))
+    const results = await Promise.all([...views.values()].map((v) => v.refresh().catch((err) => err)))
     if (results.includes('gone')) await boot()
-    const lost = results.length && results.every((r) => r === 'error')
-    setMsg(page.banner, lost ? 'Lost the connection to the plugin.' : '', 'alert')
+    const lost = results.length > 0 && results.every((r) => r instanceof Error)
+    const auth = lost && results.find((r) => r.status === 401 || r.status === 403)
+    setMsg(page.banner, !lost ? '' : auth ? auth.message : 'Lost the connection to the plugin.', 'alert')
   } finally {
     refreshing = false
   }
