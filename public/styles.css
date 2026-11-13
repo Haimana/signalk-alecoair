@@ -156,9 +156,12 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   min-height: 0;
   padding: 0 0 4px 68px; /* with the 32 px panel padding: 100 px before the gauge */
 }
-/* Desktop spacing: gauge → −/+ 64 px, −/+ → modes column 24 px (modes centred in a 460 px column). */
+/* Desktop spacing: gauge → −/+ 64 px, −/+ → first mode button 38 px on every unit.
+   The modes column is as wide as its mode row; the status row is centred under it
+   and does not widen the column (width 0 + min-width 100%). */
 .dial { margin-right: 64px; }
-.steppers { margin-right: 24px; }
+.steppers { margin-right: 38px; }
+.side > .extras, .side > .msg { width: 0; min-width: 100%; }
 .msg { text-align: center; }
 
 .dial { position: relative; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
@@ -278,7 +281,7 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
 .step:not(:disabled):hover { color: #fff; filter: var(--glow); }
 
 .side {
-  flex: 0 1 460px;
+  flex: 0 1 auto;
   min-width: 0;
   align-self: stretch;
   display: flex;
@@ -395,6 +398,7 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   .steppers { flex-direction: row; gap: 24px; margin-right: 0; }
   .dial { margin-right: 0; }
   .side { flex: 1 1 auto; }
+  .side > .extras, .side > .msg { width: 100%; min-width: 0; }
   .step-plus { order: 0; }
   .dial { justify-content: center; }
   .ring { width: min(244px, calc(100vw - 150px)); height: min(244px, calc(100vw - 150px)); }
