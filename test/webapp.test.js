@@ -9,85 +9,71 @@ const vm = require('vm')
 const pub = path.join(__dirname, '..', 'public')
 const html = fs.readFileSync(path.join(pub, 'index.html'), 'utf8')
 const app = fs.readFileSync(path.join(pub, 'app.js'), 'utf8')
+const css = fs.readFileSync(path.join(pub, 'styles.css'), 'utf8')
+const tpl = (html.match(/<template id="deviceTemplate">([\s\S]*?)<\/template>/) || [])[1]
 
 test('WebApp script compiles', () => {
   assert.doesNotThrow(() => new vm.Script(app, { filename: 'app.js' }))
 })
 
-test('every unit is rendered from one compact per-device template (stacked, no tab switcher)', () => {
-  const tpl = html.match(/<template id="deviceTemplate">([\s\S]*?)<\/template>/)
+test('every unit is one glass panel cloned from a template, stacked (no switcher, no sheets)', () => {
   assert.ok(tpl, 'index.html has the per-device template')
-  assert.equal(/\sid="/.test(tpl[1]), false, 'no ids inside the template, it is cloned once per unit')
-  assert.equal(/id="switcher"/.test(html), false, 'the one-at-a-time switcher is gone')
+  assert.equal(/\sid="/.test(tpl), false, 'no ids inside the template, it is cloned once per unit')
   assert.ok(/id="deviceList"/.test(html))
+  assert.equal(/id="switcher"|sheetBackdrop|id="subtitle"|class="footer"/.test(html), false, 'no switcher, sheet, subtitle or footer')
 })
 
-test('every element the device card script uses exists in the template', () => {
-  const tpl = html.match(/<template id="deviceTemplate">([\s\S]*?)<\/template>/)[1]
+test('every element the card script uses exists in the template', () => {
   const roles = new Set([...tpl.matchAll(/data-r="([A-Za-z]+)"/g)].map((m) => m[1]))
   const used = new Set([...app.matchAll(/\b(?:e|this\.el)\.([A-Za-z]+)\b/g)].map((m) => m[1]))
   for (const r of used) assert.ok(roles.has(r), `template is missing data-r="${r}"`)
 })
 
-test('mode, fan and settings open one shared bottom sheet; only reported controls are offered', () => {
-  assert.ok(/id="sheetBackdrop"/.test(html), 'bottom sheet in the page')
-  for (const r of ['powerBtn', 'modeBtn', 'fanBtn', 'settingsBtn', 'minus', 'plus', 'target', 'indoor']) {
-    assert.ok(html.includes(`data-r="${r}"`), `card has ${r}`)
-  }
-  assert.ok(/show\(e\.fanBtn, c\.fan\)/.test(app), 'fan button follows controls.fan')
-  assert.ok(/st\.modes/.test(app), 'mode sheet lists the plugin modes from state')
+test('every icon the script or template references is defined', () => {
+  const defined = new Set([...html.matchAll(/<symbol id="([\w-]+)"/g)].map((m) => m[1]))
+  const refs = [...html.matchAll(/href="#(i-[\w-]+)"/g), ...app.matchAll(/'#?(i-[\w-]+)'/g)].map((m) => m[1])
+  for (const r of refs) assert.ok(defined.has(r), `icon ${r} is not defined`)
+  assert.ok(/'i-mode'/.test(app), 'unknown modes get a fallback icon')
+})
+
+test('modes are an icon row from state.modes (radio buttons), External last; no dropdown, no hard-coded names', () => {
+  assert.ok(/role="radiogroup" aria-label="Working mode"/.test(tpl))
+  assert.ok(/next\.modes/.test(app), 'mode buttons come from the live state')
+  assert.ok(/class="mode" role="radio"/.test(app))
+  assert.equal(/role="listbox"|select-menu/.test(app), false, 'no dropdown any more')
   assert.equal(/Manual|Sleeping/.test(app), false, 'no hard-coded official-app mode names')
+  assert.ok(/m\.value === 'external'/.test(app), 'External comes from the plugin mode `external`')
+  assert.ok(/pickMode\(value\)\s*\{[\s\S]*?this\.command\(\{ mode: value \}\)/.test(app), 'a tap sends the mode command')
+  assert.ok(/\.modes \{[^}]*flex-wrap: wrap/.test(css), 'the mode row wraps')
 })
 
-test('desktop: wide card with the controls expanded on the right; phones keep the bar and sheets', () => {
-  const css = fs.readFileSync(path.join(pub, 'styles.css'), 'utf8')
-  assert.ok(html.includes('data-r="side"'), 'card has the desktop controls panel')
-  assert.ok(html.includes('class="actions"'), 'phone bottom bar still in the card')
-  assert.equal(/repeat\(2, minmax/.test(css), false, 'no two-column grid of square cards')
-  const wide = css.match(/@media \(min-width: (\d+)px\)\s*\{[^@]*\.unit-side/)
-  assert.ok(wide, 'controls panel is shown only from a desktop breakpoint')
-  assert.ok(app.includes(`(min-width: ${wide[1]}px)`), 'script uses the same breakpoint')
+test('controls follow the profile: fan, child lock, timer only when reported; range and step from state', () => {
+  assert.ok(/show\(e\.fan, c\.fan\)/.test(app))
+  assert.ok(/show\(e\.lock, c\.childLock\)/.test(app))
+  assert.ok(/show\(e\.timerWrap, c\.timer\)/.test(app))
+  assert.ok(/humidityRange/.test(app) && /r\.step/.test(app), 'range and step come from the profile')
+  assert.ok(/'CO'/.test(app), 'continuous mode shows CO as the big value')
 })
 
-test('desktop: working mode is a dropdown (listbox), not a radio list; phones keep the mode sheet', () => {
-  assert.ok(/aria-haspopup="listbox"/.test(app), 'mode button opens a listbox')
-  assert.ok(/role="listbox"/.test(app) && /role="option"[^`]*data-mode=/.test(app), 'modes are options of the listbox')
-  assert.equal(/role="radio"[^`]*data-mode=/.test(app), false, 'modes are no longer radio buttons')
-  assert.ok(/openSheetFor\(this, 'mode'\)/.test(app), 'phone bar still opens the mode sheet')
-  assert.ok(/kind === 'mode'/.test(app), 'mode sheet still lists the modes')
-  // Choosing sends at once; outside click and Escape close the menu.
-  assert.ok(/pickMode\(value\)\s*\{[\s\S]*?this\.command\(\{ mode: value \}\)/.test(app), 'a choice sends the mode command')
-  assert.ok(/addEventListener\('pointerdown'/.test(app), 'outside click closes the dropdown')
-  assert.ok(/ev\.key !== 'Escape'[\s\S]*?closeMenu/.test(app), 'Escape closes the dropdown')
-  assert.ok(/!WIDE\.matches && openMenu\) closeMenu/.test(app), 'narrowing below the breakpoint closes the dropdown')
-  assert.ok(/WIDE\.matches && openSheet\) closeSheet/.test(app), 'widening past the breakpoint closes a sheet')
-})
-
-test('desktop: fixed-height controls panel, same card height for every model', () => {
-  const css = fs.readFileSync(path.join(pub, 'styles.css'), 'utf8')
-  const menu = css.match(/\.select-menu\s*\{([^}]*)\}/)
-  assert.ok(menu && /position:\s*absolute/.test(menu[1]), 'open dropdown overlays instead of pushing the layout')
-  assert.ok(/class="side-controls"/.test(app), 'mode and fan share one row')
-  assert.ok(/\.side-controls\s*\{[^}]*min-height/.test(css), 'mode/fan row keeps its height when a unit has no fan')
-  assert.ok(/\.side-grid\s*\{[^}]*minmax\(0, 1fr\) minmax\(0, 1fr\)[^}]*min-height/.test(css), 'settings are a two-column grid with a reserved height')
-  assert.ok(/if \(c\.fan\)/.test(app), 'fan only for units that report one, no dummy control')
-  assert.ok(/\.mode-pill\[hidden\]\s*\{[^}]*visibility:\s*hidden/.test(css), 'left column keeps the mode pill room')
-  // Built once per control set, then only refreshed, so the 2 s poll does not close the dropdown.
-  assert.ok(/if \(sig !== this\.sideSig\)/.test(app), 'side panel is rebuilt only when the control set changes')
-})
-
-test('external sensor: one more entry in the working-mode menu; ring and −/+ follow the controller; status line on the card', () => {
-  assert.ok(html.includes('data-r="ext"'), 'card has the external-control status line')
-  assert.equal(/toggleRow\('External sensor'/.test(app), false, 'no separate switch in the Settings sheet')
-  assert.equal(/data-ext=/.test(app), false, 'no separate switch in the desktop settings grid')
-  assert.equal(/items\.push\('external'\)/.test(app), false)
-  assert.ok(/mode === 'external'/.test(app), 'the external entry is the plugin mode `external` from state.modes')
+test('external sensor: target goes to the control route, antenna icon for the external humidity, tooltip with state', () => {
   assert.ok(/\/control`/.test(app), 'the external target goes to the control route, not to the unit')
-  assert.ok(/Number\(ctl\.target \|\| 50\) \+ dir \* r\.step/.test(app), '−/+ step the external target by the hygrostat step')
-  assert.equal(/EXT_RANGE/.test(app), false, 'no separate 1 % range')
-  assert.equal(/manual-pause/.test(app), false, 'no manual pause any more')
-  assert.ok(/sourceHumidity/.test(app), 'ring shows the external humidity')
+  assert.ok(/sourceHumidity/.test(app))
+  assert.ok(/#i-external/.test(app) && /#i-droplet/.test(app))
+  assert.equal(/manual-pause|EXT_RANGE/.test(app), false)
   for (const s of ['running', 'idle', 'waiting', 'defrost', 'sensor-missing', 'too-cold']) {
     assert.ok(app.includes(`${s.includes('-') ? `'${s}'` : s}:`), `status label for ${s}`)
   }
+})
+
+test('accessibility and refresh: slider is keyboard-operable, targets are >= 44 px, cards are not rebuilt on refresh', () => {
+  assert.ok(/role="slider"[^>]*tabindex="0"/.test(tpl))
+  assert.ok(/ArrowRight/.test(app) && /Home/.test(app))
+  assert.ok(/focus-visible/.test(css))
+  for (const sel of ['.icon-btn', '.step']) {
+    const m = css.match(new RegExp(`\\${sel} \\{[^}]*width: (\\d+)px`))
+    assert.ok(m && Number(m[1]) >= 44, `${sel} is at least 44 px`)
+  }
+  assert.ok(/if \(sig === this\.modesSig\) return/.test(app), 'mode buttons are rebuilt only when the modes change')
+  assert.ok(/if \(sig === this\.dotsSig\) return/.test(app), 'slider dots are rebuilt only when the range changes')
+  assert.ok(/TARGET_DEBOUNCE_MS/.test(app) && /beginHold/.test(app), 'debounce and optimistic hold kept')
 })
