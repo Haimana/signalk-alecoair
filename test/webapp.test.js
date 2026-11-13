@@ -77,3 +77,13 @@ test('accessibility and refresh: slider is keyboard-operable, targets are >= 44 
   assert.ok(/if \(sig === this\.dotsSig\) return/.test(app), 'slider dots are rebuilt only when the range changes')
   assert.ok(/TARGET_DEBOUNCE_MS/.test(app) && /beginHold/.test(app), 'debounce and optimistic hold kept')
 })
+
+test('left: dotted arc with -/+ beside it and the values in its centre; right: modes on top, status below', () => {
+  assert.ok(/class="dial"[\s\S]*data-r="minus"[\s\S]*class="ring"[\s\S]*class="readout"[\s\S]*data-r="plus"/.test(tpl), 'minus, arc with readout, plus')
+  assert.ok(/class="side"[\s\S]*data-r="modes"[\s\S]*class="status"/.test(tpl), 'modes above the status icons on the right')
+  assert.equal(/panel-bottom|slider-wrap/.test(tpl), false, 'no horizontal slider any more')
+  assert.ok(/arcPoint\(/.test(app) && /sweep: 270/.test(app), '270-degree arc')
+  assert.ok(/Math\.atan2/.test(app), 'tap or drag on the arc sets the target')
+  const dim = css.match(/--dim: rgba\(255, 255, 255, (0\.\d+)\)/)
+  assert.ok(dim && Number(dim[1]) >= 0.35, 'unlit elements are clearly visible')
+})

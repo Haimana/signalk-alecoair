@@ -61,24 +61,25 @@
         </header>
 
         <div class="panel-main">
-          <div class="readout">
-            <div class="target" data-r="targetBox"><span class="num" data-r="target">—</span><span class="unit" data-r="targetUnit">%</span></div>
-            <div class="current" data-r="current"><svg aria-hidden="true"><use data-r="currentIcon" href="#i-droplet"></use></svg><span data-r="currentValue">—</span></div>
-          </div>
-          <div class="humidity-ctrl" data-r="humidityCtrl">
+          <div class="dial">
             <button type="button" class="step" data-r="minus" aria-label="Lower target humidity"><svg aria-hidden="true"><use href="#i-minus"></use></svg></button>
-            <div class="slider-wrap">
-              <div class="track" data-r="track" role="slider" tabindex="0" aria-label="Target humidity" aria-valuemin="30" aria-valuemax="80" aria-valuenow="50"><span class="knob" data-r="knob"></span></div>
-              <div class="slider-ends" aria-hidden="true"><span data-r="rangeMin">30</span><span data-r="rangeMax">80</span></div>
+            <div class="ring" data-r="track" role="slider" tabindex="0" aria-label="Target humidity" aria-valuemin="30" aria-valuemax="80" aria-valuenow="50">
+              <svg viewBox="0 0 200 200" aria-hidden="true" focusable="false">
+                <g data-r="dots"></g>
+                <circle class="knob" data-r="knob" cx="100" cy="14" r="7.5"/>
+              </svg>
+              <div class="readout">
+                <div class="target" data-r="targetBox"><span class="num" data-r="target">—</span><span class="unit" data-r="targetUnit">%</span></div>
+                <div class="current" data-r="current"><svg aria-hidden="true"><use data-r="currentIcon" href="#i-droplet"></use></svg><span data-r="currentValue">—</span></div>
+              </div>
+              <span class="end end-min" data-r="rangeMin" aria-hidden="true">30</span>
+              <span class="end end-max" data-r="rangeMax" aria-hidden="true">80</span>
             </div>
             <button type="button" class="step" data-r="plus" aria-label="Raise target humidity"><svg aria-hidden="true"><use href="#i-plus"></use></svg></button>
           </div>
-        </div>
 
-        <div class="msg" data-r="msg" role="status" aria-live="polite"></div>
-
-        <div class="panel-bottom">
-          <div class="modes" data-r="modes" role="radiogroup" aria-label="Working mode"></div>
+          <div class="side">
+            <div class="modes" data-r="modes" role="radiogroup" aria-label="Working mode"></div>
           <div class="extras">
             <div class="fan" data-r="fan" role="radiogroup" aria-label="Fan speed" hidden>
               <button type="button" class="fan-btn" data-fan="low" role="radio" aria-checked="false" aria-label="Fan low"><svg aria-hidden="true"><use href="#i-fan-low"></use></svg><span class="lbl">Low</span></button>
@@ -101,6 +102,8 @@
               <button type="button" class="stat" data-r="dryToggle" aria-label="Inside dry" aria-pressed="false" title="Inside dry: dries the unit inside after use" hidden><svg aria-hidden="true"><use href="#i-droplet"></use></svg><span class="meta"></span></button>
               <span class="stat" data-r="extStat" role="img" aria-label="External sensor" title="External sensor"><svg aria-hidden="true"><use href="#i-external"></use></svg><span class="meta"></span></span>
             </div>
+          </div>
+            <div class="msg" data-r="msg" role="status" aria-live="polite"></div>
           </div>
         </div>
       </div>

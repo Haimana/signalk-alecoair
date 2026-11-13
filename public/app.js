@@ -6,9 +6,11 @@
  * Signal K Admin → Plugin Config → AlecoAir.
  *
  * Dead-front glass panel per unit, stacked: name, LAN dot and power on top;
- * big target digits with the current humidity under them; a dotted slider
- * with −/+; a row of mode icon buttons; status icons (compressor, defrost,
- * tank full in red, child lock, timer, external sensor) on the right.
+ * on the left a dotted 270° arc (lit dots = current humidity, knob = target)
+ * with −/+ beside it and the values in its centre (big target or CO, current
+ * humidity small with a droplet or the external antenna); on the right the
+ * working-mode icon buttons and under them the status icons (compressor,
+ * defrost, tank full in red, child lock, timer, external sensor, fan).
  * Lit = active, dim = inactive. Everything comes from the live state and the
  * profile: the modes (plus "External" when external control is allowed for
  * the unit), which controls exist, the humidity range and step.
@@ -25,6 +27,9 @@ const TARGET_DEBOUNCE_MS = 700
 const TIMER_DEBOUNCE_MS = 700
 const ERROR_SHOW_MS = 8000
 const DOTS_PER_STEP = 3
+const SVG_NS = 'http://www.w3.org/2000/svg'
+// Arc geometry (viewBox 200×200): 270° clockwise from bottom-left, gap at the bottom.
+const ARC = { cx: 100, cy: 100, r: 86, start: 135, sweep: 270 }
 const EXT_STATE = {
   starting: 'Starting',
   running: 'Running',
@@ -113,6 +118,11 @@ function modeShort(m) {
   return label.split(/\s*[/(·]\s*/)[0] || label
 }
 
+function arcPoint(frac) {
+  const a = (ARC.start + ARC.sweep * frac) * Math.PI / 180
+  return { x: ARC.cx + ARC.r * Math.cos(a), y: ARC.cy + ARC.r * Math.sin(a) }
+}
+
 function sectionId(key) {
   return `device-${key}`
 }
@@ -191,23 +201,32 @@ class DeviceView {
       nextBtn.focus()
     })
 
-    // Slider: tap or drag anywhere on the dots; the value snaps to the profile step.
+    // Arc: tap or drag on the ring of dots (not the centre); the value snaps to the profile step.
     const track = e.track
     let dragging = false
-    const fromX = (x) => {
-      const rect = track.getBoundingClientRect()
+    const fromPoint = (x, y, strict) => {
+      const svg = track.querySelector('svg').getBoundingClientRect()
+      const scale = 200 / Math.max(1, svg.width)
+      const dx = (x - svg.left) * scale - ARC.cx
+      const dy = (y - svg.top) * scale - ARC.cy
+      if (strict && Math.hypot(dx, dy) < ARC.r * 0.62) return null
+      let deg = Math.atan2(dy, dx) * 180 / Math.PI - ARC.start
+      deg = ((deg % 360) + 360) % 360
+      if (deg > ARC.sweep) deg = deg > ARC.sweep + (360 - ARC.sweep) / 2 ? 0 : ARC.sweep
       const r = this.range()
-      const frac = clamp((x - rect.left) / Math.max(1, rect.width), 0, 1)
-      return r.min + frac * (r.max - r.min)
+      return r.min + (deg / ARC.sweep) * (r.max - r.min)
     }
     track.addEventListener('pointerdown', (ev) => {
       if (track.getAttribute('aria-disabled') === 'true') return
+      const v = fromPoint(ev.clientX, ev.clientY, true)
+      if (v === null) return
+      ev.preventDefault()
       dragging = true
       try { track.setPointerCapture(ev.pointerId) } catch {}
       track.focus({ preventScroll: true })
-      this.setTarget(fromX(ev.clientX))
+      this.setTarget(v)
     })
-    track.addEventListener('pointermove', (ev) => { if (dragging) this.setTarget(fromX(ev.clientX)) })
+    track.addEventListener('pointermove', (ev) => { if (dragging) this.setTarget(fromPoint(ev.clientX, ev.clientY, false)) })
     const stop = () => { dragging = false }
     track.addEventListener('pointerup', stop)
     track.addEventListener('pointercancel', stop)
@@ -370,28 +389,32 @@ class DeviceView {
     }
   }
 
-  /** Dots of the slider: three per humidity step, rebuilt only when the range changes. */
+  /** Dots of the arc: three per humidity step, rebuilt only when the range changes. */
   buildDots(r) {
     const sig = `${r.min}|${r.max}|${r.step}`
     if (sig === this.dotsSig) return
     this.dotsSig = sig
     const n = Math.round((r.max - r.min) / r.step) * DOTS_PER_STEP + 1
-    const track = this.el.track
-    track.querySelectorAll('.dot').forEach((d) => d.remove())
+    const group = this.el.dots
+    group.replaceChildren()
     this.dots = []
     for (let i = 0; i < n; i++) {
       const frac = i / (n - 1)
-      const d = document.createElement('i')
-      d.className = 'dot'
-      d.style.left = `${(frac * 100).toFixed(3)}%`
+      const p = arcPoint(frac)
+      const d = document.createElementNS(SVG_NS, 'circle')
+      d.setAttribute('class', i % DOTS_PER_STEP === 0 ? 'dot major' : 'dot')
+      d.setAttribute('cx', p.x.toFixed(2))
+      d.setAttribute('cy', p.y.toFixed(2))
+      d.setAttribute('r', i % DOTS_PER_STEP === 0 ? '2' : '1.6')
       d.dataset.v = String(r.min + frac * (r.max - r.min))
-      track.insertBefore(d, this.el.knob)
+      d.dataset.f = String(frac)
+      group.appendChild(d)
       this.dots.push(d)
     }
     this.el.rangeMin.textContent = String(r.min)
     this.el.rangeMax.textContent = String(r.max)
-    track.setAttribute('aria-valuemin', String(r.min))
-    track.setAttribute('aria-valuemax', String(r.max))
+    this.el.track.setAttribute('aria-valuemin', String(r.min))
+    this.el.track.setAttribute('aria-valuemax', String(r.max))
   }
 
   render(raw) {
@@ -449,24 +472,28 @@ class DeviceView {
       : `Humidity at the unit ${curText}`
     e.current.setAttribute('aria-label', e.current.title)
 
-    // Slider: knob on the target, dots lit up to the current humidity.
-    show(e.humidityCtrl, canTarget)
+    // Arc: knob on the target, dots lit up to the current humidity.
+    e.minus.style.visibility = canTarget ? '' : 'hidden'
+    e.plus.style.visibility = canTarget ? '' : 'hidden'
     this.buildDots(r)
-    const pos = (v) => clamp((v - r.min) / (r.max - r.min), 0, 1) * 100
+    const frac = (v) => clamp((v - r.min) / (r.max - r.min), 0, 1)
     const showKnob = canTarget && !continuous
-    e.knob.hidden = !showKnob
-    e.knob.style.left = `${pos(target).toFixed(3)}%`
-    const knobPos = pos(target)
-    const halfDot = 100 / Math.max(1, this.dots.length - 1) * 0.75
+    const kp = arcPoint(frac(target))
+    e.knob.setAttribute('cx', kp.x.toFixed(2))
+    e.knob.setAttribute('cy', kp.y.toFixed(2))
+    e.knob.setAttribute('visibility', showKnob ? 'visible' : 'hidden')
+    const knobF = frac(target)
+    const near = 0.75 / Math.max(1, this.dots.length - 1)
     for (const d of this.dots) {
       const v = Number(d.dataset.v)
-      d.classList.toggle('lit', hasRh && v <= rh + 0.01)
-      d.classList.toggle('under', showKnob && Math.abs(pos(v) - knobPos) < halfDot)
+      d.classList.toggle('lit', Boolean(hasRh && v <= rh + 0.01))
+      d.classList.toggle('under', showKnob && Math.abs(Number(d.dataset.f) - knobF) < near)
     }
     e.track.setAttribute('aria-valuenow', String(Math.round(target)))
     e.track.setAttribute('aria-valuetext', continuous ? 'Continuous' : `Target ${Math.round(target)} percent`)
     e.track.setAttribute('aria-label', extOn ? 'External sensor target humidity' : 'Target humidity')
-    e.track.setAttribute('aria-disabled', String(!connected))
+    e.track.setAttribute('aria-disabled', String(!connected || !canTarget))
+    e.track.tabIndex = canTarget ? 0 : -1
     e.minus.setAttribute('aria-label', extOn ? 'Lower external target' : 'Lower target humidity')
     e.plus.setAttribute('aria-label', extOn ? 'Raise external target' : 'Raise target humidity')
     e.minus.disabled = !connected || (!continuous && target <= r.min)
