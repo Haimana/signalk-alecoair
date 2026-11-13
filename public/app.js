@@ -530,7 +530,9 @@ class DeviceView {
     lit(e.tank, next.tankFull)
     e.tank.title = next.tankFull ? 'Tank full' : 'Tank: not full'
     e.tank.setAttribute('aria-label', e.tank.title)
-    show(e.lock, c.childLock)
+    // Child lock and timer: only when the unit has them AND Admin says to show them (off by default).
+    const ui = next.ui || {}
+    show(e.lock, c.childLock && ui.showChildLock === true)
     lit(e.lock, next.childLock)
     e.lock.setAttribute('aria-pressed', String(Boolean(next.childLock)))
     e.lock.title = next.childLock ? 'Child lock on (tap to unlock the unit buttons)' : 'Child lock off (tap to lock the unit buttons)'
@@ -545,8 +547,10 @@ class DeviceView {
     e.dryToggle.setAttribute('aria-pressed', String(Boolean(next.insideDry)))
     e.dryToggle.disabled = !connected
 
-    show(e.timerWrap, c.timer)
-    if (c.timer) {
+    const showTimer = Boolean(c.timer && ui.showTimer === true)
+    show(e.timerWrap, showTimer)
+    if (!showTimer && !e.timerPop.hidden) this.timerOpen(false)
+    if (showTimer) {
       const h = Number(next.timerHours) || 0
       const max = next.timerMaxHours || 24
       const left = Math.round(Number(next.timerRemainingMin) || 0)

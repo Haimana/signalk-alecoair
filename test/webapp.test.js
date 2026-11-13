@@ -49,8 +49,9 @@ test('modes are an icon row from state.modes (radio buttons), External last; no 
 
 test('controls follow the profile: fan, child lock, timer only when reported; range and step from state', () => {
   assert.ok(/show\(e\.fan, c\.fan\)/.test(app))
-  assert.ok(/show\(e\.lock, c\.childLock\)/.test(app))
-  assert.ok(/show\(e\.timerWrap, c\.timer\)/.test(app))
+  assert.ok(/show\(e\.lock, c\.childLock && ui\.showChildLock === true\)/.test(app), 'child lock: profile AND the Admin checkbox')
+  assert.ok(/const showTimer = Boolean\(c\.timer && ui\.showTimer === true\)/.test(app) && /show\(e\.timerWrap, showTimer\)/.test(app), 'timer: profile AND the Admin checkbox')
+  assert.ok(/if \(!showTimer && !e\.timerPop\.hidden\) this\.timerOpen\(false\)/.test(app), 'hiding the timer closes its stepper')
   assert.ok(/humidityRange/.test(app) && /r\.step/.test(app), 'range and step come from the profile')
   assert.ok(/'CO'/.test(app), 'continuous mode shows CO as the big value')
 })

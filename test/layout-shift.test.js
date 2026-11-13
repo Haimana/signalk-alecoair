@@ -30,7 +30,7 @@ function units() {
   }
   return {
     d13: {
-      ...base, key: 'd13', name: 'D13', mode: 'auto', targetHumidity: 45,
+      ...base, key: 'd13', name: 'D13', mode: 'auto', targetHumidity: 45, ui: { showChildLock: true, showTimer: true },
       controls: { power: true, mode: true, targetHumidity: true, fan: false, childLock: true, timer: true },
       modes: [{ value: 'auto', label: 'Auto / hygrostat' }, { value: 'external', label: 'Auto / external sensor' }, { value: 'continuous', label: 'Continuous (CO)' }, { value: 'sleep', label: 'Sleep' }],
       control: { configured: true, available: true, mode: 'internal', target: 50, state: 'internal' }

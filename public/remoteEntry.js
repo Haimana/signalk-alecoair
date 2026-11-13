@@ -101,6 +101,7 @@
       pollSeconds: 8,
       simulate: false,
       dpOverrides: {},
+      ui: { showChildLock: false, showTimer: false },
       paths: {
         prefix: defaultPrefix(key),
         electrical: defaultElectrical(key),
@@ -372,6 +373,7 @@
         props.onChange(next)
       }
       function setPath(field, value) { set('paths', Object.assign({}, d.paths, (function () { var o = {}; o[field] = value; return o })())) }
+      function setUi(field, value) { set('ui', Object.assign({ showChildLock: false, showTimer: false }, d.ui, (function () { var o = {}; o[field] = value; return o })())) }
 
       var statusLine = !st.running
         ? (st.problems && st.problems.length ? 'Not started: ' + st.problems.join(', ') : (d.enabled ? 'Not running yet (save to start)' : 'Disabled'))
@@ -434,7 +436,11 @@
           h(Field, { label: 'Poll interval (s)' }, h(TextInput, { type: 'number', value: d.pollSeconds, onChange: function (v) { set('pollSeconds', Number(v) || 8) } })),
           h('div', { className: 'aa-span2 pt-1 mb-2' },
             h(Check, { id: 'en-' + d.key, label: 'Enabled', checked: d.enabled !== false, onChange: function (v) { set('enabled', v) }, className: 'form-check-inline' }),
-            h(Check, { id: 'sim-' + d.key, label: 'Simulator (no hardware)', checked: d.simulate, onChange: function (v) { set('simulate', v) }, className: 'form-check-inline' }))),
+            h(Check, { id: 'sim-' + d.key, label: 'Simulator (no hardware)', checked: d.simulate, onChange: function (v) { set('simulate', v) }, className: 'form-check-inline' })),
+          h('div', { className: 'aa-span2 mb-2' },
+            h('div', { className: 'small text-muted mb-1' }, 'WebApp (only what the card shows; Signal K data and PUT are not affected)'),
+            h(Check, { id: 'ui-lock-' + d.key, label: 'Show child lock in UI', checked: (d.ui || {}).showChildLock === true, onChange: function (v) { setUi('showChildLock', v) }, className: 'form-check-inline' }),
+            h(Check, { id: 'ui-timer-' + d.key, label: 'Show timer in UI', checked: (d.ui || {}).showTimer === true, onChange: function (v) { setUi('showTimer', v) }, className: 'form-check-inline' }))),
         h('div', { className: 'aa-grid' },
           h(Field, { label: 'Signal K path prefix', className: 'aa-span2' }, h(TextInput, { value: d.paths.prefix, onChange: function (v) { setPath('prefix', v.trim()) } })),
           h(Field, { label: 'Estimated power path (empty = off)', className: 'aa-span2' }, h(TextInput, { value: d.paths.electrical, onChange: function (v) { setPath('electrical', v.trim()) } })),

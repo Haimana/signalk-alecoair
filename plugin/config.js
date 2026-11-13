@@ -179,8 +179,16 @@ function normalizeDevice(d = {}, index = 0) {
       publishCabinHumidity: paths.publishCabinHumidity === true,
       cabinHumidity: String(paths.cabinHumidity || 'environment.inside.relativeHumidity')
     },
-    externalControl: normalizeControlConfig(d.externalControl)
+    externalControl: normalizeControlConfig(d.externalControl),
+    // WebApp only: which optional controls the card shows. Hidden by default;
+    // the plugin, Signal K paths and PUT handlers are not affected.
+    ui: normalizeUi(d.ui)
   }
+}
+
+function normalizeUi(raw) {
+  const ui = raw && typeof raw === 'object' ? raw : {}
+  return { showChildLock: ui.showChildLock === true, showTimer: ui.showTimer === true }
 }
 
 /**

@@ -130,7 +130,8 @@ module.exports = function factory(app, injected = {}) {
   function publicDeviceState(entry) {
     const s = entry.runtime.getPublicState()
     const control = controlState(entry, s)
-    const out = { ...s, name: entry.cfg.name, control, unitMode: s.mode }
+    const ui = entry.cfg.ui || {}
+    const out = { ...s, name: entry.cfg.name, control, unitMode: s.mode, ui: { showChildLock: ui.showChildLock === true, showTimer: ui.showTimer === true } }
     if (control.configured && control.available && s.controls && s.controls.mode) {
       const modes = (s.modes || []).slice()
       modes.splice(Math.min(1, modes.length), 0, { value: EXTERNAL_MODE, label: EXTERNAL_LABEL })
@@ -982,6 +983,14 @@ module.exports = function factory(app, injected = {}) {
                   electrical: { type: 'string', title: 'Estimated power path (empty = off)' },
                   publishCabinHumidity: { type: 'boolean', title: 'Also publish cabin humidity', default: false },
                   cabinHumidity: { type: 'string', title: 'Cabin humidity path' }
+                }
+              },
+              ui: {
+                type: 'object',
+                title: 'WebApp',
+                properties: {
+                  showChildLock: { type: 'boolean', title: 'Show child lock in UI', default: false },
+                  showTimer: { type: 'boolean', title: 'Show timer in UI', default: false }
                 }
               },
               externalControl: {

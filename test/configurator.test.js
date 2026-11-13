@@ -175,3 +175,18 @@ test('External control: off by default; allowing it shows the sensor fields and 
   assert.equal(ext.hysteresisOn, 3)
   assert.equal(ext.onSensorLoss, 'internal')
 })
+
+test('WebApp checkboxes: child lock and timer hidden by default, saved per unit when checked', async () => {
+  const configuration = { configVersion: 2, devices: [{ key: 'd13', name: 'D13', tuyaId: 'cloudunit0001', enabled: true, profile: 'traditio', protocol: 'auto', paths: { prefix: 'environment.inside.dehumidifier.d13' } }] }
+  const p = await mountPanel({ status: baseStatus({ account: { linked: true, devices: CLOUD }, devices: [{ key: 'd13', running: true, hasLocalKey: true, state: { connected: true } }] }), configuration })
+  const lock = inputByLabel(p.tree, 'Show child lock in UI')
+  const timer = inputByLabel(p.tree, 'Show timer in UI')
+  assert.ok(lock && timer)
+  assert.equal(lock.props.checked, false)
+  assert.equal(timer.props.checked, false)
+  timer.props.onChange({ target: { checked: true } })
+  await settle()
+  assert.equal(inputByLabel(p.tree, 'Show timer in UI').props.checked, true)
+  button(p.tree, 'Save configuration').props.onClick()
+  assert.deepEqual(JSON.parse(JSON.stringify(p.saved[0].devices[0].ui)), { showChildLock: false, showTimer: true })
+})

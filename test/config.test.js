@@ -166,3 +166,10 @@ test('syncPathsToKey replaces the previous key in a custom prefix when the key c
   assert.equal(paths.electrical, 'electrical.loads.dehumidifierCabin.power')
 })
 
+
+test('WebApp visibility of child lock and timer: hidden unless checked in Admin', () => {
+  const [a, b] = normalizeOptions({ devices: [{ key: 'a', tuyaId: 'x1' }, { key: 'b', tuyaId: 'x2', ui: { showChildLock: true, showTimer: 'yes' } }] }).devices
+  assert.deepEqual(a.ui, { showChildLock: false, showTimer: false })
+  assert.deepEqual(b.ui, { showChildLock: true, showTimer: false }, 'only a real true counts')
+  assert.deepEqual(newDevice({ name: 'N', tuyaId: 'bf3' }).ui, { showChildLock: false, showTimer: false })
+})
