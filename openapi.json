@@ -29,7 +29,7 @@
                 "type": "object",
                 "properties": {
                   "power": { "type": "boolean" },
-                  "mode": { "type": "string", "description": "One of the device's modes, e.g. auto | continuous | sleep" },
+                  "mode": { "type": "string", "description": "One of the device's modes, e.g. auto | continuous | sleep; external (when external control is allowed) switches external control on, any other mode leaves it" },
                   "targetHumidity": { "type": "number", "description": "Percent (30–80) or ratio (0.3–0.8)" },
                   "fan": { "type": "string", "enum": ["low", "high"] },
                   "childLock": { "type": "boolean" },
@@ -56,7 +56,7 @@
                 "type": "object",
                 "properties": {
                   "mode": { "type": "string", "enum": ["internal", "external"] },
-                  "target": { "type": "number", "description": "Percent (20–90) or ratio (0.2–0.9)" }
+                  "target": { "type": "number", "description": "Percent or ratio; snapped to the unit's hygrostat step and range (Traditio: 30–80, step 5)" }
                 }
               }
             }

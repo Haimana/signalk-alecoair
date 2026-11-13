@@ -19,6 +19,8 @@ const OPENAPI = path.join(__dirname, '..', 'openapi.json')
 const CONTROL_TICK_MS = 5000
 const TEST_SENSOR_FILE = 'signalk-alecoair.test-sensor.json'
 const TEST_SENSOR_SOURCE = 'signalk-alecoair-test'
+const EXTERNAL_MODE = 'external'
+const EXTERNAL_LABEL = 'Auto / external sensor'
 const TEST_PATH_RE = /^environment\.inside\.test\.[A-Za-z0-9_.]+$/
 
 function loadOpenApi() {
@@ -119,10 +121,50 @@ module.exports = function factory(app, injected = {}) {
     return devices.values().next().value || null
   }
 
-  /** Runtime state plus the name and the external-control status. */
+  /**
+   * Runtime state plus the name and the external-control status. When
+   * external control is allowed for the unit, "Auto / external sensor" is one
+   * more working mode; while it is on, `mode` is `external` (the unit itself
+   * is in its continuous mode, kept in `unitMode`).
+   */
   function publicDeviceState(entry) {
     const s = entry.runtime.getPublicState()
-    return { ...s, name: entry.cfg.name, control: controlState(entry, s) }
+    const control = controlState(entry, s)
+    const out = { ...s, name: entry.cfg.name, control, unitMode: s.mode }
+    if (control.configured && control.available && s.controls && s.controls.mode) {
+      const modes = (s.modes || []).slice()
+      modes.splice(Math.min(1, modes.length), 0, { value: EXTERNAL_MODE, label: EXTERNAL_LABEL })
+      out.modes = modes
+      if (control.mode === 'external') out.mode = EXTERNAL_MODE
+    }
+    return out
+  }
+
+  /**
+   * Every unit command goes through here (REST, WebApp, Signal K PUT).
+   * mode `external` switches external control on; any other mode while it is
+   * on leaves it and sets that mode (with the remembered target, power on).
+   */
+  async function deviceCommand(entry, body) {
+    const cmd = { ...(body || {}) }
+    const ext = entry.cfg.externalControl || {}
+    const ctl = ext.enabled ? entry.control : null
+    if (cmd.mode === EXTERNAL_MODE) {
+      delete cmd.mode
+      await setControl(entry, { mode: 'external' })
+    } else if (ctl && cmd.mode !== undefined && ctl.mode === 'external') {
+      for (let i = 0; i < 50 && entry.controlBusy; i++) await new Promise((r) => setTimeout(r, 100))
+      const unit = entry.runtime.getPublicState()
+      const leave = ctl.leaveTo(unit, String(cmd.mode))
+      delete cmd.mode
+      controlLog(entry, { request: { mode: leave.mode } })
+      if (ctl.takeDirty()) saveControl(entry)
+      const ok = await sendControlCommands(entry, [leave], `mode ${leave.mode} picked`)
+      publishControl(entry)
+      if (!ok) throw new Error(`Could not set ${leave.mode} on the unit; see the plugin log.`)
+    }
+    if (Object.keys(cmd).length) await entry.runtime.command(cmd)
+    return publicDeviceState(entry)
   }
 
   function controlState(entry, unitState) {
@@ -181,8 +223,7 @@ module.exports = function factory(app, injected = {}) {
       const entry = withDevice(req, res)
       if (!entry) return
       try {
-        await entry.runtime.command(req.body || {})
-        res.json(publicDeviceState(entry))
+        res.json(await deviceCommand(entry, req.body || {}))
       } catch (err) {
         res.status(400).json({ error: err.message || String(err) })
       }
@@ -210,7 +251,7 @@ module.exports = function factory(app, injected = {}) {
       const entry = getEntry()
       if (!entry) return res.status(503).json({ error: 'No device is configured.' })
       try {
-        res.json(await entry.runtime.command(req.body || {}))
+        res.json(await deviceCommand(entry, req.body || {}))
       } catch (err) {
         res.status(400).json({ error: err.message || String(err) })
       }
@@ -547,7 +588,7 @@ module.exports = function factory(app, injected = {}) {
     }
     // Wait for a running tick so the two never send at the same time.
     for (let i = 0; i < 50 && entry.controlBusy; i++) await new Promise((r) => setTimeout(r, 100))
-    if (body.target !== undefined) entry.control.setTarget(body.target)
+    if (body.target !== undefined) entry.control.setTarget(body.target, unit)
     if (mode === 'external') entry.control.enable(unit)
     else if (mode === 'internal') entry.control.disable()
     controlLog(entry, { request: { mode, target: body.target } })
@@ -721,7 +762,7 @@ module.exports = function factory(app, injected = {}) {
         if (!current) {
           return { state: 'COMPLETED', statusCode: 503, message: 'Device is not running.' }
         }
-        current.runtime.command(toCommand(value)).then(() => {
+        deviceCommand(current, toCommand(value)).then(() => {
           cb({ state: 'COMPLETED', statusCode: 200 })
         }).catch((err) => {
           cb({ state: 'COMPLETED', statusCode: 400, message: err.message })

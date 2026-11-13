@@ -256,7 +256,7 @@
         h('div', { className: 'fw-semibold small mb-1' }, 'External control'),
         h('p', { className: 'small text-muted mb-2' },
           'Drive this unit from another Signal K humidity sensor: the plugin puts the unit in its continuous mode (CO on the Traditio) and switches it on and off around the target you set in the WebApp. ',
-          'Allow it here, then switch on \u201cExternal sensor\u201d on the unit\u2019s card in the WebApp (or PUT ', h('code', null, d.paths.prefix + '.control.mode'), ' = external).'),
+          'Allow it here, then pick \u201cAuto / external sensor\u201d in the unit\u2019s working-mode menu in the WebApp (or PUT ', h('code', null, d.paths.prefix + '.control.mode'), ' = external). Picking any other mode returns to the unit\u2019s own control.'),
         h(Check, { id: 'ext-' + d.key, label: 'Allow external control', checked: ext.enabled, onChange: function (v) { set('enabled', v) } }),
         ctl && ctl.configured ? h('div', { className: 'small mb-2 ' + (ctl.mode === 'external' ? 'text-success' : 'text-muted') },
           'Now: ', ctl.mode === 'external' ? 'external' : 'unit hygrostat',

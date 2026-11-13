@@ -76,12 +76,15 @@ test('desktop: fixed-height controls panel, same card height for every model', (
   assert.ok(/if \(sig !== this\.sideSig\)/.test(app), 'side panel is rebuilt only when the control set changes')
 })
 
-test('external sensor: switch with the settings, ring and −/+ follow the controller, status line on the card', () => {
+test('external sensor: one more entry in the working-mode menu; ring and −/+ follow the controller; status line on the card', () => {
   assert.ok(html.includes('data-r="ext"'), 'card has the external-control status line')
-  assert.ok(/\/control`/.test(app), 'the switch and target go to the control route, not to the unit')
-  assert.ok(/items\.push\('external'\)/.test(app), 'External sensor is offered with the settings when set up in Admin')
-  assert.ok(/toggleRow\('External sensor'/.test(app), 'phones: switch in the Settings sheet')
-  assert.ok(/data-ext=/.test(app), 'desktop: switch in the settings grid')
+  assert.equal(/toggleRow\('External sensor'/.test(app), false, 'no separate switch in the Settings sheet')
+  assert.equal(/data-ext=/.test(app), false, 'no separate switch in the desktop settings grid')
+  assert.equal(/items\.push\('external'\)/.test(app), false)
+  assert.ok(/mode === 'external'/.test(app), 'the external entry is the plugin mode `external` from state.modes')
+  assert.ok(/\/control`/.test(app), 'the external target goes to the control route, not to the unit')
+  assert.ok(/Number\(ctl\.target \|\| 50\) \+ dir \* r\.step/.test(app), '−/+ step the external target by the hygrostat step')
+  assert.equal(/EXT_RANGE/.test(app), false, 'no separate 1 % range')
   assert.ok(/sourceHumidity/.test(app), 'ring shows the external humidity')
   for (const s of ['running', 'idle', 'waiting', 'defrost', 'manual-pause', 'sensor-missing', 'too-cold']) {
     assert.ok(app.includes(`${s.includes('-') ? `'${s}'` : s}:`), `status label for ${s}`)

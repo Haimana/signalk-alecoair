@@ -139,6 +139,7 @@ class ExternalController {
     this.coldLatched = false
     this.restorePending = false
     this.dirty = false
+    this.range = null
     this.status = { state: this.mode === 'external' ? 'starting' : 'internal', reason: '' }
     this.last = { humidity: null, temperature: null, sources: [] }
   }
@@ -168,6 +169,26 @@ class ExternalController {
     }
     if (target !== undefined) this.setTarget(target, unit)
     else if (this.target === null) this.setTarget(this.defaultTarget(unit), unit)
+    else this.snapTarget(unit)
+  }
+
+  /**
+   * Leave external control because a working mode was picked (WebApp mode
+   * menu, Signal K PUT on .mode). Returns the one command that sets that
+   * mode, with the remembered hygrostat target and power on, instead of the
+   * usual restore.
+   */
+  leaveTo(unit, mode) {
+    const cmd = mode === 'continuous' ? { mode: 'continuous', power: true } : { ...this.restoreCommand(unit, true), mode }
+    if (cmd.mode !== 'continuous' && !(unit && unit.controls && unit.controls.targetHumidity)) delete cmd.targetHumidity
+    this.mode = 'internal'
+    this.inControl = false
+    this.pausedUntil = 0
+    this.restorePending = false
+    this.saved = null
+    this.markDirty()
+    this.setStatus('internal', 'The unit runs on its own hygrostat.')
+    return cmd
   }
 
   /** Turn external control off; the next tick restores the unit's own hygrostat. */
@@ -189,16 +210,41 @@ class ExternalController {
     return 50
   }
 
-  /** Accepts a percentage or a Signal K ratio. Clamped to 20–90 %, whole percent. */
-  setTarget(value) {
+  /** The unit's hygrostat range and step (Traditio 30–80 step 5); the controller target uses the same. */
+  targetRange(unit) {
+    const r = (unit && unit.humidityRange) || this.range
+    if (r && Number.isFinite(Number(r.min)) && Number.isFinite(Number(r.max))) {
+      this.range = { min: Number(r.min), max: Number(r.max), step: Number(r.step) > 0 ? Number(r.step) : 5 }
+    }
+    return this.range || { min: 30, max: 80, step: 5 }
+  }
+
+  snapValue(pct, unit) {
+    const r = this.targetRange(unit)
+    const stepped = r.min + Math.round((pct - r.min) / r.step) * r.step
+    return Math.min(r.max, Math.max(r.min, stepped))
+  }
+
+  /** Accepts a percentage or a Signal K ratio; snapped to the unit's hygrostat step and range. */
+  setTarget(value, unit) {
     const pct = toPercent(value)
     if (pct === null) throw new Error('Target must be a number (ratio 0–1 or percent).')
-    const next = Math.round(Math.min(90, Math.max(20, pct)))
+    const next = this.snapValue(pct, unit)
     if (next !== this.target) {
       this.target = next
       this.markDirty()
     }
     return this.target
+  }
+
+  /** Keep a persisted target on the unit's step and range (e.g. one saved by 0.1.0 before snapping). */
+  snapTarget(unit) {
+    if (this.target === null) return
+    const next = this.snapValue(this.target, unit)
+    if (next !== this.target) {
+      this.target = next
+      this.markDirty()
+    }
   }
 
   /** A command the caller sent failed: forget control and retry later. */
@@ -283,6 +329,7 @@ class ExternalController {
 
     const strat = controlStrategy(u)
     if (u.connected && !strat.strategy) return done('unsupported', strat.reason)
+    if (u.humidityRange) this.snapTarget(u)
     if (!u.connected) {
       this.inControl = false
       return done('offline', 'The unit is not connected.')

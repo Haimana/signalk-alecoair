@@ -165,3 +165,48 @@ test('simulated sensor file publishes only environment.inside.test.* values', as
   assert.deepEqual(delta.updates[0].values, [{ path: 'environment.inside.test.relativeHumidity', value: 0.66 }])
   await plugin.stop()
 })
+
+test('mode menu: "Auto / external sensor" only when allowed; picking it or another mode switches external control', async () => {
+  const off = install(undefined)
+  const a = boot(off.dataRoot, {})
+  await a.plugin.start(off.options)
+  await wait(20)
+  const plain = await a.router.call('GET', '/devices/:key/state', { params: { key: 'd13' } })
+  assert.equal(plain.body.modes.some((m) => m.value === 'external'), false, 'hidden when not allowed')
+  await a.plugin.stop()
+
+  const { dataRoot, options } = install({ enabled: true, humidityPaths: [SENSOR], minOnMinutes: 0, minOffMinutes: 0 })
+  const sensors = { [SENSOR]: fresh(0.62) }
+  const { app, plugin, router, FakeLan } = boot(dataRoot, sensors)
+  await plugin.start(options)
+  await wait(20)
+  let st = await router.call('GET', '/devices/:key/state', { params: { key: 'd13' } })
+  assert.deepEqual(st.body.modes.map((m) => m.value), ['auto', 'external', 'continuous', 'sleep'])
+  assert.equal(st.body.modes[1].label, 'Auto / external sensor')
+  assert.equal(st.body.mode, 'auto')
+
+  st = await router.call('POST', '/devices/:key/command', { params: { key: 'd13' }, body: { mode: 'external' } })
+  assert.equal(st.status, 200, JSON.stringify(st.body))
+  assert.equal(st.body.mode, 'external', 'the menu shows the external entry, not CO')
+  assert.equal(st.body.unitMode, 'continuous')
+  assert.equal(st.body.control.mode, 'external')
+  assert.equal(st.body.control.target, 50)
+  assert.deepEqual(FakeLan.writes[0], { 2: 25, 5: 'Manual' })
+
+  // The target steps like the unit's hygrostat (5 %, 30–80).
+  st = await router.call('POST', '/devices/:key/control', { params: { key: 'd13' }, body: { target: 0.47 } })
+  assert.equal(st.body.control.target, 45)
+  st = await router.call('POST', '/devices/:key/control', { params: { key: 'd13' }, body: { target: 12 } })
+  assert.equal(st.body.control.target, 30)
+
+  // Signal K PUT on .mode = sleep leaves external control with one write.
+  const n = FakeLan.writes.length
+  await new Promise((resolve) => app.puts[`${PREFIX}.mode`]('vessels.self', `${PREFIX}.mode`, 'sleep', resolve))
+  assert.deepEqual(FakeLan.writes.slice(n), [{ 1: true, 2: 50, 5: 'SLeeping' }])
+  st = await router.call('GET', '/devices/:key/state', { params: { key: 'd13' } })
+  assert.equal(st.body.control.mode, 'internal')
+  assert.equal(st.body.mode, 'sleep')
+  const store = JSON.parse(fs.readFileSync(path.join(dataRoot, 'signalk-alecoair.store.json'), 'utf8'))
+  assert.equal(store.control.d13.mode, 'internal')
+  await plugin.stop()
+})
