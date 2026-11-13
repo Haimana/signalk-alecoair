@@ -7,7 +7,7 @@ Signal K plugin and WebApp for AlecoAir Wi-Fi dehumidifiers over Tuya LAN: sever
 - **Setup only in Signal K Admin**, in the plugin's own configurator: **Apps & Plugins → Configuration → AlecoAir dehumidifiers**.
 - **The WebApp is for use only**: control and monitoring at `http://<signalk>:3000/signalk-alecoair/`.
 
-> Version 0.1.0 (unreleased), an early release: only the D13 Traditio has been verified on a real unit. Pure Node.js: no Python or other system packages.
+> Version 0.0.4, an early release: only the D13 Traditio has been verified on a real unit. Pure Node.js: no Python or other system packages.
 
 - **External sensor control** (optional, per unit): the plugin can drive a unit from another Signal K humidity sensor, with its own target, hysteresis and minimum on/off times. See [External sensor control](#external-sensor-control).
 
@@ -20,9 +20,13 @@ This plugin was developed with Grok Bot.
 
 The WebApp is for day-to-day control. All setup is in Signal K Admin.
 
-![AlecoAir WebApp](./docs/screenshots/webapp.png)
+![AlecoAir WebApp on a desktop](./docs/screenshots/webapp.png)
+
+<img src="./docs/screenshots/webapp-phone.png" alt="AlecoAir WebApp on a phone" width="320">
 
 ![Plugin setup in Signal K Admin](./docs/screenshots/admin-setup.png)
+
+![External control and WebApp options of a unit in Signal K Admin](./docs/screenshots/admin-external.png)
 
 ## Supported models
 
@@ -115,10 +119,16 @@ The setup panel is a Signal K plugin configurator (`signalk-plugin-configurator`
 
 Open `http://<signalk>:3000/signalk-alecoair/` (also listed under **Webapps** in Signal K Admin). Every configured unit gets its own card, stacked one under another; `?device=<key>` scrolls to a given unit. The look is inspired by the AlecoAir app, not a copy of it.
 
-Each card shows the unit's real modes for its profile and only the controls the unit actually reports: power, working mode, target humidity, timer, child lock and so on. The D13 Traditio has no fan control, so none is shown for it. Child lock and timer are hidden on the card by default; tick **Show child lock in UI** / **Show timer in UI** for a unit in Admin → Plugin Config → AlecoAir to show them. These checkboxes only change the WebApp: the Signal K paths and PUT handlers stay as they are.
+Each card shows the unit's real modes for its profile and only the controls the unit actually reports. The D13 Traditio has no fan control, so none is shown for it.
 
-- **Phone / narrow screens (< 960 px):** a compact card per unit with the mode, the humidity ring and −/+ for the target, and a bottom bar (Power, Mode, Fan if present, Settings). Mode, Fan and Settings open a bottom sheet.
-- **Desktop (≥ 960 px):** one wide card per unit, stacked vertically. Left: name, status, humidity ring and −/+. Right: Power, the working mode as a dropdown (with fan speed on the same row if the unit has a fan) and the settings in a fixed two-column area. All cards have the same height whatever the model, so units line up and an odd number of units leaves no stray card. Alerts (tank full, defrost, unit not responding) can still make a card taller while they are active.
+- **Gauge (left):** a 270° arc. The thin track is the unit's range (30–80% on the Traditio), the brighter arc goes up to the current humidity, and the knob is the target. Tap or drag on the arc, or use **−** / **+** next to it, to change the target in the unit's own steps (5%). The big number in the centre is the target (`CO` in continuous mode); the small one below it is the current humidity, with a droplet for the unit's own sensor or an antenna for the external sensor.
+- **Working modes (right):** one icon button per mode, e.g. **Auto**, **CO**, **Sleep** and, when external control is allowed for the unit, **External**. The fan speed (**Low** / **High**) sits under the modes if the unit has a fan.
+- **Status:** text labels under the modes: **Compressor**, **Defrost**, **Tank full** (red when full) and, where the unit has them, **Sleep** and **Inside dry**. Bright = active, dim = inactive. **Child lock** and **Timer** are hidden by default; tick **Show child lock in UI** / **Show timer in UI** for a unit in Admin → Plugin Config → AlecoAir to show them. These checkboxes only change the WebApp: the Signal K paths and PUT handlers stay as they are. Child lock, timer, sleep and inside dry can be tapped; the timer opens a small − / + stepper.
+- **Message line:** under the status, one line per card for errors, an unreachable unit, a full tank, defrost or an external-sensor warning. It never moves the layout: one line on a desktop (the full text is in the tooltip), two lines on a phone. If the WebApp loses the plugin, a toast appears at the top of the page.
+- **Power** is the button at the top right of the card; the dot next to it is the LAN connection (white = connected, red = not answering).
+- **Desktop:** the gauge is at the same place on every card, the modes are centred in the rest of the card, and the status line is level with the bottom of the gauge, so cards of different models line up. **Phone (< 760 px):** gauge, − / +, modes, fan, status and message are stacked and centred.
+
+Cards are built once and only updated on refresh (every 2 s), so nothing flickers. A tap shows at once; − / + and the arc send one command once the taps stop.
 
 UI labels are in English.
 
@@ -134,8 +144,9 @@ How it works:
 - **Change on the unit:** if the unit's power, mode or target is changed by anything other than the controller (the unit's buttons, the AlecoAir app, the WebApp power button or −/+ of the unit, a Signal K PUT), external control switches off at once. The unit is left exactly as it is: nothing is restored and no command is sent, and the WebApp shows the unit's real mode again. Pick **Auto / external sensor** again to resume.
 - **Sensor lost:** when no fresh value has arrived for 5 min (adjustable), the plugin either gives the unit back its own hygrostat (previous mode and target, power on; the default) or switches it off. It takes over again when the sensor is back.
 - **Temperature (optional):** with a temperature path, the unit is not started below a minimum temperature (default 5 °C) and is stopped when it gets that cold; it restarts 1 °C above the minimum.
+- **Separate target.** External control has its own target, shown on the gauge while **External** is selected. It is kept between sessions and is independent of the unit's own hygrostat target, which comes back when you pick Auto again.
 - After a restart the controller picks up where it was: same target, the same on/off choice (the unit is put back to it if the plugin stop restored the hygrostat) and the minimum on/off time counted from the last switch.
-- Switching external control off (or turning it off in Admin) restores the unit's own mode and target and switches it on. When the plugin stops while external control is on, the "sensor lost" choice is applied; after a restart, external control resumes with the same target.
+- Switching external control off (or turning it off in Admin) restores the unit's own mode and target and switches it on. When the plugin stops while external control is on (a Signal K restart or a plugin update), the "sensor lost" choice is applied, so with the default the unit briefly runs on its own hygrostat; after the restart, external control resumes with the same target and on/off choice within a few seconds.
 - A profile without a continuous mode (D16 Purify) uses the lowest hygrostat target the unit accepts plus power on/off instead. Set the external target above that minimum.
 - Values this plugin publishes itself are never used as the external sensor, so a unit's humidity published as cabin humidity cannot feed back.
 
@@ -145,7 +156,7 @@ Setting it up:
 2. **Humidity path**: pick the sensor's Signal K path from the list (paths with "humidity" that the server has seen, with their current value and source) or type one, e.g. `environment.inside.relativeHumidity`. Signal K publishes relative humidity as a ratio 0–1; a percentage (any value above 1.5) is detected too. Each unit uses exactly one sensor; several units may use the same one.
 3. Optional: **Temperature path** (Kelvin, as Signal K publishes it) and the minimum temperature.
 4. Adjust the hysteresis, minimum times, the stale timeout and what to do when the sensor is lost, or keep the defaults. **Save configuration**.
-5. In the WebApp, pick **Auto / external sensor** in the unit's working-mode menu (the Mode sheet on a phone, the working-mode dropdown on a desktop). The entry is there only while external control is allowed in Admin. While it is on, the menu shows it as the selected mode, even though the unit itself is in CO. Picking any other mode (Auto / hygrostat, Continuous, Sleep) leaves external control and sets that mode with the remembered target, power on. The ring shows the external humidity (the unit's own reading is shown below it, smaller), −/+ change the controller target in the unit's own hygrostat steps and range (5% steps, 30–80% on the Traditio; a target set over the API or Signal K is snapped the same way), and a status line says what the controller is doing: running, idle, waiting (minimum time), defrost, sensor missing, too cold or tank full. Hovering the status line shows the reason.
+5. In the WebApp, tap **External** in the unit's mode buttons. The button is there only while external control is allowed in Admin. While it is on, **External** is the lit mode, even though the unit itself is in CO. Tapping any other mode (Auto, CO, Sleep) leaves external control and sets that mode with the unit's remembered hygrostat target, power on. The gauge shows the external humidity (antenna icon); − / + and the arc change the controller target in the unit's own hygrostat steps and range (5% steps, 30–80% on the Traditio; a target set over the API or Signal K is snapped the same way). The **External** button's tooltip says what the controller is doing (running, idle, waiting for the minimum time, defrost, sensor missing, too cold, tank full) and why; problems such as a missing sensor also appear on the card's message line.
 
 The same can be done from Signal K: `PUT <prefix>.control.mode` = `external` or `internal`, and `PUT <prefix>.control.target` (ratio, e.g. `0.55`). `PUT <prefix>.mode` = `external` also switches it on, and a PUT of any other mode on `<prefix>.mode` leaves it. The published `<prefix>.mode` stays the unit's real mode (`continuous` while external control drives it); `<prefix>.control.mode` says whether external control is on.
 
@@ -185,6 +196,8 @@ D13 Traditio talks Tuya protocol **3.5** on the LAN. The cloud often returns a W
 The live D13 reports only these seven DPs. The Traditio profile also maps fan speed to DP 4 (present on the D25 per tuya-local), but it stays hidden on a D13 because the D13 never reports DP 4.
 
 Manual defaults: Manual + hygrostat, CO = continuous via target `25`, restart threshold **target + 1% RH**, 2.3 L tank, 145 / 170 / 195 W.
+
+**Timer (DP 17).** On the D13 the timer is an **off-timer**: `1h`…`24h` switches the unit off after that many hours, whatever the humidity, and `cancel` clears it (manual: 0–24 h, 0 = off; a power cut resets it). The plugin writes the value as it is and adds no logic of its own. The D13 has no countdown DP, so `timerRemaining` is only the set hours × 60 min, not a live countdown. With external control on, the timer switching the unit off counts as a change on the unit and ends external control (the unit stays off, in CO). Whether switching the unit off also clears its timer has not been verified. This is why the timer is hidden on the card by default.
 
 ## Security notes
 

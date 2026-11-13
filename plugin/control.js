@@ -61,7 +61,7 @@ function cleanPath(p) {
 /** Normalize the per-device "External control" options. */
 function normalizeControlConfig(raw) {
   const c = raw && typeof raw === 'object' ? raw : {}
-  // One sensor per unit. Older 0.1.0 drafts kept a list (humidityPaths): keep its first path.
+  // One sensor per unit. Earlier development drafts kept a list (humidityPaths): keep its first path.
   let humidityPath = cleanPath(c.humidityPath)
   if (!humidityPath) {
     const list = Array.isArray(c.humidityPaths) ? c.humidityPaths : String(c.humidityPaths || '').split(',')
@@ -238,7 +238,7 @@ class ExternalController {
     return this.target
   }
 
-  /** Keep a persisted target on the unit's step and range (e.g. one saved by 0.1.0 before snapping). */
+  /** Keep a persisted target on the unit's step and range (e.g. one saved by an earlier draft before snapping). */
   snapTarget(unit) {
     if (this.target === null) return
     const next = this.snapValue(this.target, unit)

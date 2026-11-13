@@ -432,7 +432,7 @@ test('restart: the controller\'s power choice and last switch time are persisted
   assert.equal(r.tick().status.state, 'waiting', 'minimum off time counts from the switch before the restart')
 })
 
-test('persisted state from 0.1.0 without power: the unit\'s current power is kept', () => {
+test('persisted state from an earlier draft without power: the unit\'s current power is kept', () => {
   const r = harness({}, { mode: 'external', target: 50, saved: { mode: 'auto', targetHumidity: 50 } }, { mode: 'continuous', targetHumidity: 25, power: true })
   r.humidity(50)
   assert.deepEqual(r.tick().commands, [])
