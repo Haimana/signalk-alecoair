@@ -200,18 +200,23 @@ const BALANCE = `(() => {
     const R = Math.max(...vis.map((e) => e.getBoundingClientRect().right))
     const b = (s) => p.querySelector(s).getBoundingClientRect()
     const m = b('.msg')
+    const st = [...p.querySelectorAll('.stat')].filter((e) => !e.closest('[hidden]')).map((e) => e.getBoundingClientRect())
     out[p.dataset.key] = {
       left: Math.round(L - pr.left), right: Math.round(pr.right - R),
       gaugeToStep: Math.round(b('.step-plus').left - b('.ring').right),
       stepToMode: Math.round(b('.mode').left - b('.step-plus').right),
       modeRows: new Set([...p.querySelectorAll('.mode')].map((e) => Math.round(e.getBoundingClientRect().top))).size,
-      msgInside: m.left >= pr.left && m.right <= pr.right
+      msgInside: m.left >= pr.left && m.right <= pr.right,
+      statRows: new Set(st.map((x) => Math.round(x.top))).size,
+      statLeft: Math.round(Math.min(...st.map((x) => x.left)) - pr.left),
+      statRight: Math.round(pr.right - Math.max(...st.map((x) => x.right))),
+      statBelow: Math.round(Math.min(...st.map((x) => x.top)) - Math.max(b('.ring').bottom, b('.side').bottom))
     }
   }
   return JSON.stringify(out)
 })()`
 
-test('desktop: the gauge / -/+ / modes group is centred in every card (equal free space left and right)', { skip: !CHROME && 'no Chrome/Chromium found', timeout: 90000 }, async () => {
+test('desktop: the gauge / -/+ / modes group and the status row are centred in every card', { skip: !CHROME && 'no Chrome/Chromium found', timeout: 90000 }, async () => {
   const { st, server, port } = await fakeServer()
   const cdp = launch()
   try {
@@ -238,6 +243,9 @@ test('desktop: the gauge / -/+ / modes group is centred in every card (equal fre
         assert.equal(g.stepToMode, 38, `-/+ -> first mode (${at})`)
         assert.equal(g.modeRows, 1, `modes on one row (${at})`)
         assert.ok(g.msgInside, `message stays inside the card (${at})`)
+        assert.equal(g.statRows, 1, `status labels on one row (${at})`)
+        assert.ok(Math.abs(g.statLeft - g.statRight) <= 1, `status row centred (${at})`)
+        assert.ok(g.statBelow >= 0, `status row below the gauge and modes (${at})`)
       }
     }
   } finally {

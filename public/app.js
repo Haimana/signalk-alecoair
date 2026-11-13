@@ -9,8 +9,9 @@
  * on the left a 270° gauge (thin dim arc; a thicker bright arc = current
  * humidity; knob = target), − and + next to the mode buttons and the values in its centre (big target or CO, current
  * humidity small with a droplet or the external antenna); on the right the
- * working-mode icon buttons and under them the status icons (compressor,
- * defrost, tank full in red, child lock, timer, external sensor, fan).
+ * working-mode icon buttons and the fan speed under them; at the bottom, across
+ * the card, a centred row of status text labels (compressor, defrost, tank
+ * full in red, child lock, timer, sleep, inside dry, external sensor).
  * Lit = active, dim = inactive. Everything comes from the live state and the
  * profile: the modes (plus "External" when external control is allowed for
  * the unit), which controls exist, the humidity range and step.
@@ -42,7 +43,7 @@ const EXT_STATE = {
   error: 'Command failed, retrying',
   internal: 'Off'
 }
-// External-control states worth one line on the card (the rest are in the icon tooltip).
+// External-control states worth one line on the card (the rest are in the label tooltip).
 const EXT_WARN = new Set(['sensor-missing', 'too-cold', 'error', 'unsupported'])
 
 const page = {
@@ -515,7 +516,7 @@ class DeviceView {
       b.disabled = !connected
     })
 
-    // Status icons.
+    // Status labels (bottom row).
     const lit = (el, v) => el.classList.toggle('lit', Boolean(v))
     show(e.compressor, s.compressor)
     lit(e.compressor, on && next.compressor)

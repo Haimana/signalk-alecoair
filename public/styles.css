@@ -157,18 +157,18 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   justify-content: center;
   padding: 0 0 4px;
 }
-/* Desktop: the group [gauge][−/+][modes + status] is centred in the card, so the
+/* Desktop: the group [gauge][−/+][modes + fan] is centred in the card, so the
    free space left of the gauge equals the free space right of the modes on every
    unit, whatever its mode count. The two spacers keep at least 68 px (+ the 32 px
    panel padding = 100 px) each side; on a narrow card they shrink equally (huge
    shrink factor, so they give way first) and the modes wrap only once they are 0. */
 .panel-main::before, .panel-main::after { content: ''; flex: 0 100000 68px; min-width: 0; }
 /* Desktop spacing: gauge → −/+ 64 px, −/+ → first mode button 38 px on every unit.
-   The modes column is as wide as its mode row; the status row is centred under it
+   The modes column is as wide as its mode row; the fan row is centred under it
    and does not widen the column (width 0 + min-width 100%). */
 .dial { margin-right: 64px; }
 .steppers { margin-right: 38px; }
-.side > .extras { width: 0; min-width: 100%; }
+.side > .fan { width: 0; min-width: 100%; }
 
 .dial { position: relative; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
 .ring {
@@ -348,9 +348,9 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
 }
 .page-msg.show { transform: translate(-50%, 0); }
 
-/* ——— Modes (top right) and status (below) ——— */
+/* ——— Modes and fan (right column) ——— */
 .modes { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 6px 4px; min-width: 0; }
-.mode, .fan-btn, .stat {
+.mode, .fan-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -361,13 +361,13 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   transition: color 0.2s;
 }
 .mode { min-width: 84px; padding: 6px 8px 6px; }
-.mode svg, .stat svg, .fan-btn svg {
+.mode svg, .fan-btn svg {
   width: 23px; height: 23px;
   stroke: currentColor; fill: none; stroke-width: var(--stroke);
   stroke-linecap: round; stroke-linejoin: round;
 }
 .mode svg { width: 32px; height: 32px; }
-.lbl, .stat .meta {
+.lbl {
   margin-top: 6px;
   font-size: 9px;
   font-weight: 400;
@@ -378,22 +378,48 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   white-space: nowrap;
 }
 .mode .lbl { margin-top: 9px; font-size: 11px; }
-.mode:not(:disabled):not(.lit):hover, .fan-btn:not(:disabled):not(.lit):hover, button.stat:not(:disabled):not(.lit):hover { color: var(--hover); }
+.mode:not(:disabled):not(.lit):hover, .fan-btn:not(:disabled):not(.lit):hover { color: var(--hover); }
 .mode.lit, .fan-btn.lit { color: #fff; filter: var(--glow-strong); }
 .mode.lit .lbl, .fan-btn.lit .lbl { color: rgba(255,255,255,0.95); }
 
-.extras { display: flex; align-items: flex-start; justify-content: center; flex-wrap: wrap; gap: 2px; }
-.fan { display: flex; align-items: flex-start; margin-right: 10px; padding-right: 10px; border-right: 1px solid rgba(255,255,255,0.12); }
+.fan { display: flex; align-items: flex-start; justify-content: center; gap: 4px; }
 .fan-btn { min-width: 48px; padding: 4px 6px 0; }
 .fan-btn svg { fill: currentColor; stroke-width: 0; }
 
-.status { display: flex; align-items: flex-start; justify-content: center; flex-wrap: wrap; }
-.stat { min-width: 50px; padding: 4px 4px 0; }
-.stat .meta { letter-spacing: 0.08em; text-transform: none; color: transparent; min-height: 9px; font-variant-numeric: tabular-nums; }
-.stat.lit { color: #fff; filter: var(--glow); }
-.stat.lit .meta { color: rgba(255,255,255,0.92); }
-.stat.danger.lit { color: var(--red); filter: drop-shadow(0 0 8px var(--red-glow)); }
-.stat.danger.lit { --tank-fill: var(--red); } /* inherits into the <use> icon */
+/* ——— Status: a full-width row of text labels at the bottom of the card ———
+   Inactive = dim but readable, active = bright with a glow, tank full = red.
+   Child lock, timer, sleep and inside dry are buttons (tap to toggle / set). */
+.status {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 0 26px;
+  margin-top: 16px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.stat {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  line-height: 1;
+  color: var(--dim-label);
+  border-radius: 10px;
+  transition: color 0.2s, text-shadow 0.2s;
+}
+.stat .meta { margin-left: 6px; letter-spacing: 0.08em; text-transform: none; font-variant-numeric: tabular-nums; }
+button.stat:not(:disabled):not(.lit):hover { color: var(--hover); }
+.stat.lit { color: #fff; text-shadow: 0 0 8px rgba(255,255,255,0.45); }
+.stat.danger.lit { color: var(--red); text-shadow: 0 0 8px var(--red-glow); }
 .stat[data-state="sensor-missing"].lit, .stat[data-state="too-cold"].lit, .stat[data-state="error"].lit { opacity: 0.6; }
 
 /* Timer stepper popover */
@@ -422,6 +448,7 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
 .panel.is-off .panel.is-offline .target, .panel.is-offline .current { color: var(--dim); filter: none; }
 .panel.is-offline .ring .knob { stroke: var(--dim); filter: none; }
 .panel.is-offline .mode.lit { color: rgba(255,255,255,0.5); filter: none; }
+.panel.is-offline .stat.lit { color: rgba(255,255,255,0.5); text-shadow: none; }
 
 /* Empty state */
 .panel.empty { min-height: 0; padding: 28px 32px; }
@@ -440,8 +467,8 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   .steppers { flex-direction: row; gap: 24px; margin-right: 0; }
   .dial { margin-right: 0; }
   .side { flex: 1 1 auto; }
-  .side > .extras { width: 100%; min-width: 0; }
-  /* Phone: a fixed 2-line slot under the status icons, always reserved. */
+  .side > .fan { width: 100%; min-width: 0; }
+  /* Phone: a fixed 2-line slot under the modes, always reserved. */
   .side > .msg {
     position: static;
     transform: none;
@@ -459,7 +486,5 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   .side { align-items: center; gap: 16px; padding: 0; }
   .modes { justify-content: center; width: 100%; }
   .mode { min-width: 72px; }
-  .extras { justify-content: center; width: 100%; }
-  .status { justify-content: center; }
-  .fan { width: 100%; justify-content: center; margin: 0 0 6px; padding: 0; border-right: none; }
+  .status { gap: 0 18px; margin-top: 12px; padding-top: 4px; }
 }
