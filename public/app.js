@@ -6,8 +6,8 @@
  * Signal K Admin → Plugin Config → AlecoAir.
  *
  * Dead-front glass panel per unit, stacked: name, LAN dot and power on top;
- * on the left a dotted 270° arc (lit dots and a solid sector = current
- * humidity, knob = target) with − and + at its two ends and the values in its centre (big target or CO, current
+ * on the left a 270° gauge (thin dim arc; a thicker bright arc = current
+ * humidity; knob = target), − and + next to the mode buttons and the values in its centre (big target or CO, current
  * humidity small with a droplet or the external antenna); on the right the
  * working-mode icon buttons and under them the status icons (compressor,
  * defrost, tank full in red, child lock, timer, external sensor, fan).
@@ -26,8 +26,6 @@ const $ = (id) => document.getElementById(id)
 const TARGET_DEBOUNCE_MS = 700
 const TIMER_DEBOUNCE_MS = 700
 const ERROR_SHOW_MS = 8000
-const DOTS_PER_STEP = 3
-const SVG_NS = 'http://www.w3.org/2000/svg'
 // Arc geometry (viewBox 200×200): 270° clockwise from bottom-left, gap at the bottom.
 const ARC = { cx: 100, cy: 100, r: 86, start: 135, sweep: 270 }
 const EXT_STATE = {
@@ -141,8 +139,7 @@ class DeviceView {
     this.extHold = null
     this.extBusy = false
     this.modesSig = ''
-    this.dotsSig = ''
-    this.dots = []
+    this.rangeSig = ''
     this.error = null
     this.root = page.template.content.firstElementChild.cloneNode(true)
     this.root.id = sectionId(this.key)
@@ -201,7 +198,7 @@ class DeviceView {
       nextBtn.focus()
     })
 
-    // Arc: tap or drag on the ring of dots (not the centre); the value snaps to the profile step.
+    // Arc: tap or drag on the arc (not the centre); the value snaps to the profile step.
     const track = e.track
     let dragging = false
     const fromPoint = (x, y, strict) => {
@@ -389,28 +386,11 @@ class DeviceView {
     }
   }
 
-  /** Dots of the arc: three per humidity step, rebuilt only when the range changes. */
-  buildDots(r) {
+  /** Range labels and slider bounds, set only when the range changes. */
+  buildRange(r) {
     const sig = `${r.min}|${r.max}|${r.step}`
-    if (sig === this.dotsSig) return
-    this.dotsSig = sig
-    const n = Math.round((r.max - r.min) / r.step) * DOTS_PER_STEP + 1
-    const group = this.el.dots
-    group.replaceChildren()
-    this.dots = []
-    for (let i = 0; i < n; i++) {
-      const frac = i / (n - 1)
-      const p = arcPoint(frac)
-      const d = document.createElementNS(SVG_NS, 'circle')
-      d.setAttribute('class', i % DOTS_PER_STEP === 0 ? 'dot major' : 'dot')
-      d.setAttribute('cx', p.x.toFixed(2))
-      d.setAttribute('cy', p.y.toFixed(2))
-      d.setAttribute('r', i % DOTS_PER_STEP === 0 ? '2' : '1.6')
-      d.dataset.v = String(r.min + frac * (r.max - r.min))
-      d.dataset.f = String(frac)
-      group.appendChild(d)
-      this.dots.push(d)
-    }
+    if (sig === this.rangeSig) return
+    this.rangeSig = sig
     this.el.rangeMin.textContent = String(r.min)
     this.el.rangeMax.textContent = String(r.max)
     this.el.track.setAttribute('aria-valuemin', String(r.min))
@@ -472,14 +452,14 @@ class DeviceView {
       : `Humidity at the unit ${curText}`
     e.current.setAttribute('aria-label', e.current.title)
 
-    // Arc: knob on the target, dots lit up to the current humidity.
+    // Gauge: thin background arc, thicker bright arc up to the current humidity, knob on the target.
     e.minus.style.visibility = canTarget ? '' : 'hidden'
     e.plus.style.visibility = canTarget ? '' : 'hidden'
-    this.buildDots(r)
+    this.buildRange(r)
     const frac = (v) => clamp((v - r.min) / (r.max - r.min), 0, 1)
     const showKnob = canTarget && !continuous
-    // Solid sector from the range start to the current humidity, over the dotted gauge.
     const arcLen = 2 * Math.PI * ARC.r
+    e.arcBg.setAttribute('stroke-dasharray', `${(arcLen * ARC.sweep / 360).toFixed(2)} ${arcLen.toFixed(2)}`)
     const fill = hasRh ? frac(rh) * arcLen * ARC.sweep / 360 : 0
     e.arcFill.setAttribute('stroke-dasharray', `${fill.toFixed(2)} ${arcLen.toFixed(2)}`)
     e.arcFill.setAttribute('visibility', fill > 0 ? 'visible' : 'hidden')
@@ -487,13 +467,6 @@ class DeviceView {
     e.knob.setAttribute('cx', kp.x.toFixed(2))
     e.knob.setAttribute('cy', kp.y.toFixed(2))
     e.knob.setAttribute('visibility', showKnob ? 'visible' : 'hidden')
-    const knobF = frac(target)
-    const near = 0.75 / Math.max(1, this.dots.length - 1)
-    for (const d of this.dots) {
-      const v = Number(d.dataset.v)
-      d.classList.toggle('lit', Boolean(hasRh && v <= rh + 0.01))
-      d.classList.toggle('under', showKnob && Math.abs(Number(d.dataset.f) - knobF) < near)
-    }
     e.track.setAttribute('aria-valuenow', String(Math.round(target)))
     e.track.setAttribute('aria-valuetext', continuous ? 'Continuous' : `Target ${Math.round(target)} percent`)
     e.track.setAttribute('aria-label', extOn ? 'External sensor target humidity' : 'Target humidity')

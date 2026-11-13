@@ -69,31 +69,29 @@ test('accessibility and refresh: slider is keyboard-operable, targets are >= 44 
   assert.ok(/role="slider"[^>]*tabindex="0"/.test(tpl))
   assert.ok(/ArrowRight/.test(app) && /Home/.test(app))
   assert.ok(/focus-visible/.test(css))
-  for (const sel of ['.icon-btn', '.step']) {
-    const m = css.match(new RegExp(`\\${sel} \\{[^}]*width: (\\d+)px`))
+  for (const sel of ['.icon-btn', '.step', '.mode', '.stat']) {
+    const m = css.match(new RegExp(`\\${sel} \\{[^}]*?(?:min-)?width: (\\d+)px`))
     assert.ok(m && Number(m[1]) >= 44, `${sel} is at least 44 px`)
   }
   assert.ok(/if \(sig === this\.modesSig\) return/.test(app), 'mode buttons are rebuilt only when the modes change')
-  assert.ok(/if \(sig === this\.dotsSig\) return/.test(app), 'slider dots are rebuilt only when the range changes')
+  assert.ok(/if \(sig === this\.rangeSig\) return/.test(app), 'range labels are set only when the range changes')
   assert.ok(/TARGET_DEBOUNCE_MS/.test(app) && /beginHold/.test(app), 'debounce and optimistic hold kept')
 })
 
-test('left: dotted arc with -/+ beside it and the values in its centre; right: modes on top, status below', () => {
-  assert.ok(/class="dial"[\s\S]*data-r="minus"[\s\S]*class="ring"[\s\S]*class="readout"[\s\S]*data-r="plus"/.test(tpl), 'minus, arc with readout, plus')
-  assert.ok(/class="side"[\s\S]*data-r="modes"[\s\S]*class="status"/.test(tpl), 'modes above the status icons on the right')
-  assert.equal(/panel-bottom|slider-wrap/.test(tpl), false, 'no horizontal slider any more')
-  assert.ok(/arcPoint\(/.test(app) && /sweep: 270/.test(app), '270-degree arc')
-  assert.ok(/Math\.atan2/.test(app), 'tap or drag on the arc sets the target')
+test('gauge: thin background arc and a thicker current-humidity arc (no dots); -/+ in the mode row; right column centred', () => {
+  assert.ok(/class="ring"[\s\S]*class="readout"/.test(tpl), 'values in the centre of the gauge')
+  assert.ok(/data-r="arcBg"[\s\S]*data-r="arcFill"[\s\S]*data-r="knob"/.test(tpl), 'background arc, then humidity arc, then the knob on top')
+  assert.equal(/class="dot|DOTS_PER_STEP|data-r="dots"/.test(tpl + app), false, 'no dots any more')
+  const bg = css.match(/\.ring \.arc-bg \{[^}]*stroke-width: ([\d.]+)/)
+  const fg = css.match(/\.ring \.arc-fill \{[^}]*stroke-width: ([\d.]+)/)
+  assert.ok(bg && fg && Number(fg[1]) > Number(bg[1]) * 2, 'humidity arc is clearly thicker')
+  assert.ok(/arcPoint\(/.test(app) && /sweep: 270/.test(app) && /Math\.atan2/.test(app), 'tap or drag on the 270-degree arc sets the target')
+  assert.ok(/class="mode-row"[\s\S]*class="steppers"[\s\S]*data-r="minus"[\s\S]*data-r="plus"[\s\S]*data-r="modes"/.test(tpl), '-/+ in the same row as the modes')
+  assert.equal(/class="dial"[^]*?data-r="minus"[^]*?class="side"/.test(tpl), false, '-/+ are not on the gauge')
+  assert.ok(/<symbol id="i-minus" viewBox="0 0 24 24"><path [^>]*\/><\/symbol>/.test(html), 'bare minus glyph')
+  assert.ok(/\.step \{[^}]*min-width: 64px;[^}]*min-height: 48px/.test(css), '-/+ sized like the mode buttons')
+  assert.ok(/@media \(max-width: 760px\)[\s\S]*\.mode-row \{ flex-direction: column/.test(css), 'phone: -/+ on their own row above the modes')
+  assert.ok(/\.side \{[^}]*align-items: center/.test(css) && /\.modes \{[^}]*justify-content: center/.test(css) && /\.status \{[^}]*justify-content: center/.test(css), 'modes and status centred')
   const dim = css.match(/--dim: rgba\(255, 255, 255, (0\.\d+)\)/)
   assert.ok(dim && Number(dim[1]) >= 0.35, 'unlit elements are clearly visible')
-})
-
-test('-/+ are bare glyphs at the two ends of the arc; a solid sector shows the current humidity over the dotted gauge', () => {
-  assert.ok(/<symbol id="i-minus" viewBox="0 0 24 24"><path [^>]*\/><\/symbol>/.test(html), 'minus has no circle outline')
-  assert.ok(/<symbol id="i-plus" viewBox="0 0 24 24"><path [^>]*\/><\/symbol>/.test(html), 'plus has no circle outline')
-  assert.ok(/step-min/.test(tpl) && /step-max/.test(tpl) && /\.step-min \{/.test(css) && /\.step-max \{/.test(css), 'placed at the min and max ends')
-  assert.ok(/\.step \{[^}]*width: 48px; height: 48px/.test(css), '48 px hit area kept')
-  assert.ok(/data-r="dots"[\s\S]*data-r="arcFill"[\s\S]*data-r="knob"/.test(tpl), 'dots, then the solid sector, then the knob on top')
-  assert.ok(/arcFill\.setAttribute\('stroke-dasharray'/.test(app))
-  assert.ok(/\.side \{[^}]*align-items: center/.test(css) && /\.modes \{[^}]*justify-content: center/.test(css) && /\.status \{[^}]*justify-content: center/.test(css), 'modes and status centred in the right column')
 })

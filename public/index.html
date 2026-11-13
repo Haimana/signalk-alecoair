@@ -62,10 +62,9 @@
 
         <div class="panel-main">
           <div class="dial">
-            <button type="button" class="step step-min" data-r="minus" aria-label="Lower target humidity"><svg aria-hidden="true"><use href="#i-minus"></use></svg></button>
             <div class="ring" data-r="track" role="slider" tabindex="0" aria-label="Target humidity" aria-valuemin="30" aria-valuemax="80" aria-valuenow="50">
               <svg viewBox="0 0 200 200" aria-hidden="true" focusable="false">
-                <g data-r="dots"></g>
+                <circle class="arc-bg" data-r="arcBg" cx="100" cy="100" r="86" transform="rotate(135 100 100)"/>
                 <circle class="arc-fill" data-r="arcFill" cx="100" cy="100" r="86" transform="rotate(135 100 100)"/>
                 <circle class="knob" data-r="knob" cx="100" cy="14" r="7.5"/>
               </svg>
@@ -76,11 +75,16 @@
               <span class="end end-min" data-r="rangeMin" aria-hidden="true">30</span>
               <span class="end end-max" data-r="rangeMax" aria-hidden="true">80</span>
             </div>
-            <button type="button" class="step step-max" data-r="plus" aria-label="Raise target humidity"><svg aria-hidden="true"><use href="#i-plus"></use></svg></button>
           </div>
 
           <div class="side">
-            <div class="modes" data-r="modes" role="radiogroup" aria-label="Working mode"></div>
+            <div class="mode-row">
+              <div class="steppers" role="group" aria-label="Target humidity">
+                <button type="button" class="step" data-r="minus" aria-label="Lower target humidity"><svg aria-hidden="true"><use href="#i-minus"></use></svg></button>
+                <button type="button" class="step" data-r="plus" aria-label="Raise target humidity"><svg aria-hidden="true"><use href="#i-plus"></use></svg></button>
+              </div>
+              <div class="modes" data-r="modes" role="radiogroup" aria-label="Working mode"></div>
+            </div>
           <div class="extras">
             <div class="fan" data-r="fan" role="radiogroup" aria-label="Fan speed" hidden>
               <button type="button" class="fan-btn" data-fan="low" role="radio" aria-checked="false" aria-label="Fan low"><svg aria-hidden="true"><use href="#i-fan-low"></use></svg><span class="lbl">Low</span></button>
