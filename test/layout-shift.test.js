@@ -209,13 +209,15 @@ const BALANCE = `(() => {
       statRows: new Set(st.map((x) => Math.round(x.top))).size,
       statLeft: Math.round(Math.min(...st.map((x) => x.left)) - pr.left),
       statRight: Math.round(pr.right - Math.max(...st.map((x) => x.right))),
-      statBelow: Math.round(Math.min(...st.map((x) => x.top)) - Math.max(b('.ring').bottom, b('.side').bottom))
+      statBelow: Math.round(Math.min(...st.map((x) => x.top)) - Math.max(...ms.map((x) => x.bottom), p.querySelector('.fan').hidden ? 0 : b('.fan').bottom)),
+      statVsModes: Math.round((Math.min(...st.map((x) => x.left)) + Math.max(...st.map((x) => x.right))) / 2 - (Math.min(...ms.map((x) => x.left)) + Math.max(...ms.map((x) => x.right))) / 2),
+      msgBelowStat: Math.round(m.top - Math.max(...st.map((x) => x.bottom)))
     }
   }
   return JSON.stringify(out)
 })()`
 
-test('desktop: gauge at the same x on every card, modes centred in the rest, status row centred', { skip: !CHROME && 'no Chrome/Chromium found', timeout: 90000 }, async () => {
+test('desktop: gauge at the same x on every card, modes centred in the rest, status labels centred under them', { skip: !CHROME && 'no Chrome/Chromium found', timeout: 90000 }, async () => {
   const { st, server, port } = await fakeServer()
   const cdp = launch()
   try {
@@ -244,9 +246,10 @@ test('desktop: gauge at the same x on every card, modes centred in the rest, sta
         assert.ok(g.modesLeft >= 16, `room between the -/+ and the modes (${at})`)
         assert.equal(g.modeRows, 1, `modes on one row (${at})`)
         assert.ok(g.msgInside, `message stays inside the card (${at})`)
-        assert.equal(g.statRows, 1, `status labels on one row (${at})`)
-        assert.ok(Math.abs(g.statLeft - g.statRight) <= 1, `status row centred (${at})`)
-        assert.ok(g.statBelow >= 0, `status row below the gauge and modes (${at})`)
+        assert.ok(g.statRows <= 2, `status labels on at most two lines (${at})`)
+        assert.ok(Math.abs(g.statVsModes) <= 2, `status labels centred under the modes (${at})`)
+        assert.ok(g.statBelow >= 0, `status labels below the modes and fan (${at})`)
+        assert.ok(g.msgBelowStat >= 0, `message slot below the status labels (${at})`)
       }
     }
   } finally {

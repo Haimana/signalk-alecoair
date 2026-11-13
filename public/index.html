@@ -88,25 +88,24 @@
               <button type="button" class="fan-btn" data-fan="low" role="radio" aria-checked="false" aria-label="Fan low"><svg aria-hidden="true"><use href="#i-fan-low"></use></svg><span class="lbl">Low</span></button>
               <button type="button" class="fan-btn" data-fan="high" role="radio" aria-checked="false" aria-label="Fan high"><svg aria-hidden="true"><use href="#i-fan-high"></use></svg><span class="lbl">High</span></button>
             </div>
+            <div class="status" data-r="status" role="group" aria-label="Status">
+              <span class="stat" data-r="compressor" role="img" aria-label="Compressor" title="Compressor">Compressor</span>
+              <span class="stat" data-r="defrost" role="img" aria-label="Defrost" title="Defrost">Defrost</span>
+              <span class="stat danger" data-r="tank" role="img" aria-label="Tank" title="Tank">Tank full</span>
+              <button type="button" class="stat" data-r="lock" aria-label="Child lock" aria-pressed="false" title="Child lock">Child lock</button>
+              <div class="timer-wrap" data-r="timerWrap">
+                <button type="button" class="stat" data-r="timer" aria-label="Timer" aria-haspopup="true" aria-expanded="false" title="Timer">Timer<span class="meta" data-r="timerMeta"></span></button>
+                <div class="timer-pop" data-r="timerPop" role="group" aria-label="Timer off after" hidden>
+                  <button type="button" class="pop-btn" data-r="timerMinus" aria-label="Shorter timer">−</button>
+                  <span class="pop-val" data-r="timerValue" aria-live="polite">Off</span>
+                  <button type="button" class="pop-btn" data-r="timerPlus" aria-label="Longer timer">+</button>
+                </div>
+              </div>
+              <button type="button" class="stat" data-r="sleepToggle" aria-label="Sleep" aria-pressed="false" title="Sleep" hidden>Sleep</button>
+              <button type="button" class="stat" data-r="dryToggle" aria-label="Inside dry" aria-pressed="false" title="Inside dry: dries the unit inside after use" hidden>Inside dry</button>
+            </div>
             <div class="msg" data-r="msg" role="status" aria-live="polite" aria-hidden="true"></div>
           </div>
-        </div>
-        <div class="status" data-r="status" role="group" aria-label="Status">
-          <span class="stat" data-r="compressor" role="img" aria-label="Compressor" title="Compressor">Compressor</span>
-          <span class="stat" data-r="defrost" role="img" aria-label="Defrost" title="Defrost">Defrost</span>
-          <span class="stat danger" data-r="tank" role="img" aria-label="Tank" title="Tank">Tank full</span>
-          <button type="button" class="stat" data-r="lock" aria-label="Child lock" aria-pressed="false" title="Child lock">Child lock</button>
-          <div class="timer-wrap" data-r="timerWrap">
-            <button type="button" class="stat" data-r="timer" aria-label="Timer" aria-haspopup="true" aria-expanded="false" title="Timer">Timer<span class="meta" data-r="timerMeta"></span></button>
-            <div class="timer-pop" data-r="timerPop" role="group" aria-label="Timer off after" hidden>
-              <button type="button" class="pop-btn" data-r="timerMinus" aria-label="Shorter timer">−</button>
-              <span class="pop-val" data-r="timerValue" aria-live="polite">Off</span>
-              <button type="button" class="pop-btn" data-r="timerPlus" aria-label="Longer timer">+</button>
-            </div>
-          </div>
-          <button type="button" class="stat" data-r="sleepToggle" aria-label="Sleep" aria-pressed="false" title="Sleep" hidden>Sleep</button>
-          <button type="button" class="stat" data-r="dryToggle" aria-label="Inside dry" aria-pressed="false" title="Inside dry: dries the unit inside after use" hidden>Inside dry</button>
-          <span class="stat" data-r="extStat" role="img" aria-label="External sensor" title="External sensor">External sensor</span>
         </div>
       </div>
     </article>

@@ -290,14 +290,14 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 22px;
+  gap: 14px;
   padding: 8px 0;
   position: relative;
 }
 
 /* ——— Message slot: never moves the layout ———
-   Card: desktop = one line overlaid at the bottom of the right column (in its
-   free space), ellipsis, full text in the tooltip; phone = a fixed 2-line slot.
+   Card: a slot that is always reserved under the status labels, in the modes
+   column: desktop = one line (ellipsis, full text in the tooltip), phone = 2 lines.
    Page banner: a fixed toast pill over the cards. Both fade in and out. */
 .msg {
   font-size: 11px;
@@ -313,12 +313,8 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
 .msg.show { opacity: 1; pointer-events: auto; }
 .msg.alert { color: var(--red); }
 .side > .msg {
-  position: absolute;
-  left: 50%;
-  bottom: 0;
-  transform: translateX(-50%);
-  width: min(560px, calc(100% + 40px)); /* stays inside the card when it is centred */
-  max-width: none;
+  width: 100%;
+  height: calc(1.4em); /* always reserved: one line under the status labels */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -382,7 +378,7 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
 .fan-btn { min-width: 48px; padding: 4px 6px 0; }
 .fan-btn svg { fill: currentColor; stroke-width: 0; }
 
-/* ——— Status: a full-width row of text labels at the bottom of the card ———
+/* ——— Status: text labels centred under the modes (same column) ———
    Inactive = dim but readable, active = bright with a glow, tank full = red.
    Child lock, timer, sleep and inside dry are buttons (tap to toggle / set). */
 .status {
@@ -390,17 +386,15 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   flex-wrap: wrap;
   justify-content: center;
   align-items: center;
-  gap: 0 26px;
-  margin-top: 16px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  gap: 0 22px;
+  max-width: 100%;
 }
 .stat {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 44px;
-  min-height: 44px;
+  min-height: 36px;
   padding: 0 4px;
   font-size: 10px;
   font-weight: 400;
@@ -465,10 +459,7 @@ button.stat:not(:disabled):not(.lit):hover { color: var(--hover); }
   .side > .fan { width: 100%; min-width: 0; }
   /* Phone: a fixed 2-line slot under the modes, always reserved. */
   .side > .msg {
-    position: static;
-    transform: none;
     width: 100%;
-    max-width: none;
     height: calc(2 * 1.4em);
     white-space: normal;
     display: -webkit-box;
@@ -481,5 +472,6 @@ button.stat:not(:disabled):not(.lit):hover { color: var(--hover); }
   .side { align-items: center; gap: 16px; padding: 0; }
   .modes { justify-content: center; width: 100%; }
   .mode { min-width: 72px; }
-  .status { gap: 0 18px; margin-top: 12px; padding-top: 4px; }
+  .status { gap: 0 18px; }
+  .stat { min-height: 44px; }
 }

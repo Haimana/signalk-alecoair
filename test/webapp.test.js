@@ -111,20 +111,23 @@ test('desktop spacing: gauge and -/+ at a fixed left offset on every card, modes
   assert.ok(/@media \(max-width: 760px\)[\s\S]*\.dial \{ margin-right: 0; \}/.test(css), 'phone layout unchanged')
 })
 
-test('status: a full-width row of uppercase text labels at the bottom of the card; fan stays with the modes', () => {
-  const main = tpl.indexOf('class="panel-main"')
-  const status = tpl.indexOf('class="status"')
-  assert.ok(main > 0 && status > main, 'status row comes after the main row')
-  const side = tpl.slice(tpl.indexOf('class="side"'), status)
-  assert.ok(/data-r="modes"[\s\S]*data-r="fan"[\s\S]*data-r="msg"/.test(side), 'fan (a control) and the message slot stay in the right column')
-  const row = tpl.slice(status, tpl.indexOf('</article>'))
+test('status: uppercase text labels centred under the modes (same column), then the message slot; no bottom row', () => {
+  const sideAt = tpl.indexOf('class="side"')
+  const sideEnd = tpl.indexOf('</article>')
+  const side = tpl.slice(sideAt, sideEnd)
+  assert.ok(/data-r="modes"[\s\S]*data-r="fan"[\s\S]*class="status"[\s\S]*data-r="msg"/.test(side), 'modes, fan, status labels, message: one column')
+  const row = side.slice(side.indexOf('class="status"'), side.indexOf('data-r="msg"'))
   assert.equal(/<svg|<use /.test(row), false, 'status labels are text, not icons')
-  for (const [r, label] of [['compressor', 'Compressor'], ['defrost', 'Defrost'], ['tank', 'Tank full'], ['lock', 'Child lock'], ['timer', 'Timer'], ['sleepToggle', 'Sleep'], ['dryToggle', 'Inside dry'], ['extStat', 'External sensor']]) {
+  for (const [r, label] of [['compressor', 'Compressor'], ['defrost', 'Defrost'], ['tank', 'Tank full'], ['lock', 'Child lock'], ['timer', 'Timer'], ['sleepToggle', 'Sleep'], ['dryToggle', 'Inside dry']]) {
     assert.ok(new RegExp(`data-r="${r}"[^>]*>${label}<`).test(row), `${r} label "${label}"`)
   }
+  assert.equal(/data-r="extStat"|External sensor</.test(tpl), false, 'no External sensor status label')
+  assert.equal(/e\.extStat/.test(app), false)
   assert.ok(/<button type="button" class="stat" data-r="lock"/.test(row) && /<button type="button" class="stat" data-r="timer"/.test(row) && /data-r="timerPop"/.test(row), 'child lock and timer stay tappable, timer keeps its stepper')
-  assert.ok(/\.status \{[^}]*flex-wrap: wrap;[^}]*justify-content: center;/.test(css), 'centred, wraps on narrow screens')
+  assert.ok(/\.status \{[^}]*flex-wrap: wrap;[^}]*justify-content: center;/.test(css), 'centred, wraps when the column is narrow')
+  assert.equal(/border-top/.test(css.slice(css.indexOf('.status {'), css.indexOf('}', css.indexOf('.status {')))), false, 'no divider line')
+  assert.ok(/\.side > \.msg \{[^}]*height: calc\(1\.4em\)/.test(css), 'desktop: one-line message slot always reserved')
   assert.ok(/\.stat \{[^}]*text-transform: uppercase;[^}]*color: var\(--dim-label\)/.test(css), 'uppercase, dim but readable when inactive')
   assert.ok(/\.stat\.lit \{ color: #fff;/.test(css) && /\.stat\.danger\.lit \{ color: var\(--red\);/.test(css), 'bright when active, tank full in red')
-  assert.equal(/class="extras"/.test(tpl) || /\.extras/.test(css), false, 'old status block under the modes is gone')
+  assert.equal(/class="extras"/.test(tpl) || /\.extras/.test(css), false, 'old status block is gone')
 })

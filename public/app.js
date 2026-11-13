@@ -9,9 +9,9 @@
  * on the left a 270° gauge (thin dim arc; a thicker bright arc = current
  * humidity; knob = target), − and + next to the mode buttons and the values in its centre (big target or CO, current
  * humidity small with a droplet or the external antenna); on the right the
- * working-mode icon buttons and the fan speed under them; at the bottom, across
- * the card, a centred row of status text labels (compressor, defrost, tank
- * full in red, child lock, timer, sleep, inside dry, external sensor).
+ * working-mode icon buttons, the fan speed under them, then a centred line of
+ * status text labels in the same column (compressor, defrost, tank full in
+ * red, child lock, timer, sleep, inside dry) and the message slot.
  * Lit = active, dim = inactive. Everything comes from the live state and the
  * profile: the modes (plus "External" when external control is allowed for
  * the unit), which controls exist, the humidity range and step.
@@ -565,15 +565,15 @@ class DeviceView {
       if (!connected && !e.timerPop.hidden) this.timerOpen(false)
     }
 
-    show(e.extStat, ctl.configured)
-    lit(e.extStat, extOn)
+    // External sensor: no status label any more; its state is in the External
+    // mode button's tooltip, and warnings go to the message line below.
     const extLabel = EXT_STATE[ctl.state] || ctl.state || '—'
     const temp = Number.isFinite(num(ctl.sourceTemperature)) ? ` · ${Number(ctl.sourceTemperature).toFixed(1)} °C` : ''
-    e.extStat.title = extOn
-      ? `External sensor: ${extLabel}${temp}${ctl.reason ? `\n${ctl.reason}` : ''}`
-      : 'External sensor: off (pick External to use it)'
-    e.extStat.setAttribute('aria-label', e.extStat.title)
-    e.extStat.dataset.state = extOn ? (ctl.state || '') : ''
+    const extBtn = e.modes.querySelector('[data-mode="external"]')
+    if (extBtn) {
+      const tip = extOn ? `External sensor: ${extLabel}${temp}${ctl.reason ? `\n${ctl.reason}` : ''}` : 'Auto / external sensor (off)'
+      if (extBtn.title !== tip) extBtn.title = tip
+    }
 
     // One restrained line: errors first, then offline, read-only, tank, defrost, controller warnings.
     if (this.error && Date.now() > this.error.until) this.error = null
