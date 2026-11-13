@@ -26,7 +26,7 @@ function traditio(over = {}) {
 
 /** A tiny unit model that applies the controller's commands like the runtime would. */
 function harness(cfg = {}, persisted = {}, unitOver = {}) {
-  const ctl = new ExternalController({ humidityPaths: ['environment.inside.test.relativeHumidity'], ...cfg }, persisted)
+  const ctl = new ExternalController({ humidityPath: 'environment.inside.test.relativeHumidity', ...cfg }, persisted)
   const unit = traditio(unitOver)
   let now = T0
   let rh = 50
@@ -51,7 +51,7 @@ function harness(cfg = {}, persisted = {}, unitOver = {}) {
     temperature(c) { temp = c },
     tick() {
       const r = ctl.tick(now, unit, {
-        humidity: [{ path: 'environment.inside.test.relativeHumidity', value: rh, at: rhAt }],
+        humidity: { path: 'environment.inside.test.relativeHumidity', value: rh, at: rhAt },
         temperature: temp === null ? null : { path: 'environment.inside.test.temperature', value: temp, at: now }
       })
       r.commands.forEach(apply)
@@ -64,7 +64,7 @@ function harness(cfg = {}, persisted = {}, unitOver = {}) {
 test('config: defaults, ranges, paths as list or comma string', () => {
   const c = normalizeControlConfig({})
   assert.equal(c.enabled, false)
-  assert.deepEqual(c.humidityPaths, [])
+  assert.equal(c.humidityPath, '')
   assert.equal(c.hysteresisOn, 3)
   assert.equal(c.hysteresisOff, 2)
   assert.equal(c.minOnMinutes, 10)
@@ -73,12 +73,14 @@ test('config: defaults, ranges, paths as list or comma string', () => {
   assert.equal(c.minTemperature, 5)
   assert.equal(c.onSensorLoss, 'internal')
   assert.equal(c.manualPauseMinutes, 60)
-  assert.equal(c.combine, 'max')
-  const d = normalizeControlConfig({ enabled: true, humidityPaths: 'vessels.self.environment.inside.a.relativeHumidity, environment.inside.b.relativeHumidity', onSensorLoss: 'off', minOnMinutes: -3, combine: 'average' })
-  assert.deepEqual(d.humidityPaths, ['environment.inside.a.relativeHumidity', 'environment.inside.b.relativeHumidity'])
+  assert.equal('combine' in c, false, 'one sensor, nothing to combine')
+  const d = normalizeControlConfig({ enabled: true, humidityPath: 'vessels.self.environment.inside.a.relativeHumidity', onSensorLoss: 'off', minOnMinutes: -3 })
+  assert.equal(d.humidityPath, 'environment.inside.a.relativeHumidity')
   assert.equal(d.onSensorLoss, 'off')
   assert.equal(d.minOnMinutes, 0)
-  assert.equal(d.combine, 'average')
+  const m = normalizeControlConfig({ humidityPaths: ['', 'environment.inside.b.relativeHumidity', 'environment.inside.c.relativeHumidity'], combine: 'average' })
+  assert.equal(m.humidityPath, 'environment.inside.b.relativeHumidity', 'an old list keeps its first path')
+  assert.equal('humidityPaths' in m, false)
 })
 
 test('units: ratio or percent humidity, Kelvin or Celsius temperature', () => {
@@ -230,10 +232,10 @@ test('the controller\'s own commands do not count as manual changes (grace while
   const h = harness({ minOnMinutes: 0, minOffMinutes: 0 })
   h.ctl.enable(h.unit, 50)
   h.humidity(60)
-  const r = h.ctl.tick(h.now, h.unit, { humidity: [{ path: 'x', value: 60, at: h.now }] })
+  const r = h.ctl.tick(h.now, h.unit, { humidity: { path: 'x', value: 60, at: h.now } })
   assert.deepEqual(r.commands, [{ mode: 'continuous' }])
   // The unit has not reported CO yet a few seconds later.
-  const r2 = h.ctl.tick(h.now + 5000, h.unit, { humidity: [{ path: 'x', value: 60, at: h.now + 5000 }] })
+  const r2 = h.ctl.tick(h.now + 5000, h.unit, { humidity: { path: 'x', value: 60, at: h.now + 5000 } })
   assert.notEqual(r2.status.state, 'manual-pause')
 })
 
@@ -254,13 +256,11 @@ test('too cold: the unit is not started below the minimum temperature', () => {
   assert.deepEqual(r.commands, [{ power: false }], 'running unit is stopped when it gets cold')
 })
 
-test('several sensors: max or average of the fresh ones', () => {
-  const ctl = new ExternalController({ humidityPaths: ['a', 'b'] })
-  const now = T0
-  const readings = [{ path: 'a', value: 50, at: now }, { path: 'b', value: 70, at: now }, { path: 'c', value: 99, at: now - 10 * MIN }]
-  assert.equal(ctl.combine(readings, now).value, 70)
-  const avg = new ExternalController({ humidityPaths: ['a', 'b'], combine: 'average' })
-  assert.equal(avg.combine(readings, now).value, 60)
+test('a stale reading counts as no reading', () => {
+  const ctl = new ExternalController({ humidityPath: 'a' })
+  assert.equal(ctl.fresh({ path: 'a', value: 55, at: T0 }, T0 + 4 * MIN), 55)
+  assert.equal(ctl.fresh({ path: 'a', value: 55, at: T0 }, T0 + 6 * MIN), null)
+  assert.equal(ctl.fresh(null, T0), null)
 })
 
 test('disable restores the remembered mode and target and switches the unit on', () => {
@@ -303,9 +303,9 @@ test('profile without continuous mode: lowest hygrostat target plus power on/off
     humidityRange: { min: 25, max: 80, step: 5 }
   }
   assert.equal(controlStrategy(unit).strategy, 'min-target')
-  const ctl = new ExternalController({ humidityPaths: ['x'] })
+  const ctl = new ExternalController({ humidityPath: 'x' })
   ctl.enable(unit, 50)
-  const r = ctl.tick(T0, unit, { humidity: [{ path: 'x', value: 60, at: T0 }] })
+  const r = ctl.tick(T0, unit, { humidity: { path: 'x', value: 60, at: T0 } })
   assert.deepEqual(r.commands, [{ targetHumidity: 25 }, { power: true }])
   unit.targetHumidity = 25; unit.power = true
   ctl.disable()
@@ -315,9 +315,9 @@ test('profile without continuous mode: lowest hygrostat target plus power on/off
 
 test('a unit without power control cannot be driven', () => {
   const unit = traditio({ controls: { power: false, mode: false, targetHumidity: false }, modes: [] })
-  const ctl = new ExternalController({ humidityPaths: ['x'] })
+  const ctl = new ExternalController({ humidityPath: 'x' })
   ctl.enable(unit, 50)
-  const r = ctl.tick(T0, unit, { humidity: [{ path: 'x', value: 60, at: T0 }] })
+  const r = ctl.tick(T0, unit, { humidity: { path: 'x', value: 60, at: T0 } })
   assert.deepEqual(r.commands, [])
   assert.equal(r.status.state, 'unsupported')
 })
@@ -331,21 +331,21 @@ test('offline unit: no commands; a failed command backs off and retries', () => 
   assert.equal(r.status.state, 'offline')
   assert.deepEqual(r.commands, [])
   h.unit.connected = true
-  r = h.ctl.tick(h.now, h.unit, { humidity: [{ path: 'x', value: 60, at: h.now }] })
+  r = h.ctl.tick(h.now, h.unit, { humidity: { path: 'x', value: 60, at: h.now } })
   assert.deepEqual(r.commands, [{ mode: 'continuous' }])
   h.ctl.commandFailed(h.now)
-  r = h.ctl.tick(h.now + 10000, h.unit, { humidity: [{ path: 'x', value: 60, at: h.now + 10000 }] })
+  r = h.ctl.tick(h.now + 10000, h.unit, { humidity: { path: 'x', value: 60, at: h.now + 10000 } })
   assert.deepEqual(r.commands, [])
-  r = h.ctl.tick(h.now + 31000, h.unit, { humidity: [{ path: 'x', value: 60, at: h.now + 31000 }] })
+  r = h.ctl.tick(h.now + 31000, h.unit, { humidity: { path: 'x', value: 60, at: h.now + 31000 } })
   assert.deepEqual(r.commands, [{ mode: 'continuous' }], 'retried after the back-off')
 })
 
 test('stop: fallback internal restores the hygrostat; fallback off switches off', () => {
-  const a = new ExternalController({ humidityPaths: ['x'] }, { mode: 'external', target: 50, saved: { mode: 'auto', targetHumidity: 50 } })
+  const a = new ExternalController({ humidityPath: 'x' }, { mode: 'external', target: 50, saved: { mode: 'auto', targetHumidity: 50 } })
   assert.deepEqual(a.stopCommands(traditio({ mode: 'continuous', targetHumidity: 25, power: false })), [{ mode: 'auto', targetHumidity: 50, power: true }])
-  const b = new ExternalController({ humidityPaths: ['x'], onSensorLoss: 'off' }, { mode: 'external', target: 50 })
+  const b = new ExternalController({ humidityPath: 'x', onSensorLoss: 'off' }, { mode: 'external', target: 50 })
   assert.deepEqual(b.stopCommands(traditio({ mode: 'continuous', power: true })), [{ power: false }])
-  const c = new ExternalController({ humidityPaths: ['x'] }, { mode: 'internal' })
+  const c = new ExternalController({ humidityPath: 'x' }, { mode: 'internal' })
   assert.deepEqual(c.stopCommands(traditio()), [])
 })
 
@@ -387,4 +387,29 @@ test('picking another working mode leaves external control in one command', () =
   assert.deepEqual(k.ctl.leaveTo(k.unit, 'continuous'), { mode: 'continuous', power: true })
   const a = harness({}, { mode: 'external', target: 50, saved: { mode: 'auto', targetHumidity: 50 } }, { mode: 'continuous', targetHumidity: 25 })
   assert.deepEqual(a.ctl.leaveTo(a.unit, 'auto'), { mode: 'auto', targetHumidity: 50, power: true })
+})
+
+test('restart: the controller\'s power choice and last switch time are persisted and resumed', () => {
+  const h = harness({ minOnMinutes: 10, minOffMinutes: 10 })
+  h.ctl.enable(h.unit, 50)
+  h.humidity(40); h.tick()
+  assert.equal(h.unit.power, false)
+  const saved = JSON.parse(JSON.stringify(h.ctl.persisted()))
+  assert.equal(saved.power, false)
+  assert.equal(saved.lastSwitchAt, h.now)
+  // Plugin stop restored the hygrostat (Manual 50, power on); then the new instance starts.
+  const r = harness({ minOnMinutes: 10, minOffMinutes: 10 }, saved, { mode: 'auto', targetHumidity: 50, power: true })
+  r.advance(MIN)
+  r.humidity(51) // inside the band
+  const out = r.tick()
+  assert.deepEqual(out.commands, [{ mode: 'continuous' }, { power: false }], 'back in CO and off, as before the restart')
+  assert.equal(out.status.state, 'idle')
+  r.advance(MIN); r.humidity(60)
+  assert.equal(r.tick().status.state, 'waiting', 'minimum off time counts from the switch before the restart')
+})
+
+test('persisted state from 0.1.0 without power: the unit\'s current power is kept', () => {
+  const r = harness({}, { mode: 'external', target: 50, saved: { mode: 'auto', targetHumidity: 50 } }, { mode: 'continuous', targetHumidity: 25, power: true })
+  r.humidity(50)
+  assert.deepEqual(r.tick().commands, [])
 })

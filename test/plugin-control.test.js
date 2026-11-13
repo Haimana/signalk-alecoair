@@ -56,7 +56,7 @@ test('external control off in Admin: no control paths, the control route refuses
 })
 
 test('WebApp toggle: CO on the unit, power from the external sensor, state persisted, restored on disable', async () => {
-  const { dataRoot, options } = install({ enabled: true, humidityPaths: [SENSOR], minOnMinutes: 0, minOffMinutes: 0 })
+  const { dataRoot, options } = install({ enabled: true, humidityPath: SENSOR, minOnMinutes: 0, minOffMinutes: 0 })
   const sensors = { [SENSOR]: fresh(0.62) }
   const { app, plugin, router, FakeLan } = boot(dataRoot, sensors)
   await plugin.start(options)
@@ -80,7 +80,7 @@ test('WebApp toggle: CO on the unit, power from the external sensor, state persi
   assert.equal(values[`${PREFIX}.control.sourceHumidity`], 0.62)
 
   const store = JSON.parse(fs.readFileSync(path.join(dataRoot, 'signalk-alecoair.store.json'), 'utf8'))
-  assert.deepEqual(store.control.d13, { mode: 'external', target: 55, saved: { mode: 'auto', targetHumidity: 50 } })
+  assert.deepEqual(store.control.d13, { mode: 'external', target: 55, saved: { mode: 'auto', targetHumidity: 50 }, power: true })
 
   // Humidity drops below target − 2 → power off.
   sensors[SENSOR] = fresh(0.52)
@@ -96,7 +96,7 @@ test('WebApp toggle: CO on the unit, power from the external sensor, state persi
 })
 
 test('the plugin\'s own values never feed the controller (cabin humidity feedback)', async () => {
-  const { dataRoot, options } = install({ enabled: true, humidityPaths: [SENSOR] })
+  const { dataRoot, options } = install({ enabled: true, humidityPath: SENSOR })
   const sensors = { [SENSOR]: { value: 0.7, $source: 'signalk-alecoair', timestamp: new Date().toISOString() } }
   const { plugin, router } = boot(dataRoot, sensors)
   await plugin.start(options)
@@ -108,7 +108,7 @@ test('the plugin\'s own values never feed the controller (cabin humidity feedbac
 })
 
 test('Admin picklist lists humidity and temperature paths but not the unit\'s own', async () => {
-  const { dataRoot, options } = install({ enabled: true, humidityPaths: [SENSOR] })
+  const { dataRoot, options } = install({ enabled: true, humidityPath: SENSOR })
   const sensors = { [SENSOR]: fresh(0.5), 'environment.inside.mainCabin.temperature': fresh(291.65), 'environment.rpi.cpu.temperature': fresh(318) }
   const { plugin, router } = boot(dataRoot, sensors)
   await plugin.start(options)
@@ -121,7 +121,7 @@ test('Admin picklist lists humidity and temperature paths but not the unit\'s ow
 })
 
 test('external mode survives a restart; plugin stop gives the unit its hygrostat back', async () => {
-  const { dataRoot, options } = install({ enabled: true, humidityPaths: [SENSOR], minOnMinutes: 0 })
+  const { dataRoot, options } = install({ enabled: true, humidityPath: SENSOR, minOnMinutes: 0 })
   const sensors = { [SENSOR]: fresh(0.62) }
   const first = boot(dataRoot, sensors)
   await first.plugin.start(options)
@@ -140,7 +140,7 @@ test('external mode survives a restart; plugin stop gives the unit its hygrostat
 })
 
 test('external control switched off in Admin while it was on: hygrostat restored once', async () => {
-  const { dataRoot, options } = install({ enabled: false, humidityPaths: [SENSOR] })
+  const { dataRoot, options } = install({ enabled: false, humidityPath: SENSOR })
   const storeFile = path.join(dataRoot, 'signalk-alecoair.store.json')
   const store = JSON.parse(fs.readFileSync(storeFile, 'utf8'))
   store.control = { d13: { mode: 'external', target: 50, saved: { mode: 'auto', targetHumidity: 45 } } }
@@ -175,7 +175,7 @@ test('mode menu: "Auto / external sensor" only when allowed; picking it or anoth
   assert.equal(plain.body.modes.some((m) => m.value === 'external'), false, 'hidden when not allowed')
   await a.plugin.stop()
 
-  const { dataRoot, options } = install({ enabled: true, humidityPaths: [SENSOR], minOnMinutes: 0, minOffMinutes: 0 })
+  const { dataRoot, options } = install({ enabled: true, humidityPath: SENSOR, minOnMinutes: 0, minOffMinutes: 0 })
   const sensors = { [SENSOR]: fresh(0.62) }
   const { app, plugin, router, FakeLan } = boot(dataRoot, sensors)
   await plugin.start(options)
@@ -208,5 +208,27 @@ test('mode menu: "Auto / external sensor" only when allowed; picking it or anoth
   assert.equal(st.body.mode, 'sleep')
   const store = JSON.parse(fs.readFileSync(path.join(dataRoot, 'signalk-alecoair.store.json'), 'utf8'))
   assert.equal(store.control.d13.mode, 'internal')
+  await plugin.stop()
+})
+
+test('one sensor path may drive several units', async () => {
+  const { dataRoot, options } = install({ enabled: true, humidityPath: SENSOR, minOnMinutes: 0, minOffMinutes: 0 })
+  options.devices.push({ key: 'sim', name: 'Simulator', simulate: true, profile: 'traditio', model: 'D13', externalControl: { enabled: true, humidityPath: SENSOR } })
+  const sensors = { [SENSOR]: fresh(0.62) }
+  const { app, plugin, router } = boot(dataRoot, sensors)
+  await plugin.start(options)
+  await wait(20)
+  const status = await router.call('GET', '/setup/status')
+  for (const d of status.body.devices) assert.deepEqual(d.problems, [], `${d.key} starts`)
+  for (const key of ['d13', 'sim']) {
+    const r = await router.call('POST', '/devices/:key/control', { params: { key }, body: { mode: 'external', target: 50 } })
+    assert.equal(r.status, 200, JSON.stringify(r.body))
+    assert.equal(r.body.control.humidityPath, SENSOR)
+    assert.equal(r.body.control.sourceHumidity, 62)
+    assert.equal(r.body.control.state, 'running')
+  }
+  const values = lastValues(app)
+  assert.equal(values[`${PREFIX}.control.sourceHumidity`], 0.62)
+  assert.equal(values['environment.inside.dehumidifier.sim.control.sourceHumidity'], 0.62)
   await plugin.stop()
 })

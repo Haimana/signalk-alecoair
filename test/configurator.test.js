@@ -167,7 +167,10 @@ test('External control: off by default; allowing it shows the sensor fields and 
   button(p.tree, 'Save configuration').props.onClick()
   const ext = p.saved[0].devices[0].externalControl
   assert.equal(ext.enabled, true)
-  assert.equal(JSON.stringify(ext.humidityPaths), JSON.stringify(['environment.inside.relativeHumidity']))
+  assert.equal(ext.humidityPath, 'environment.inside.relativeHumidity')
+  assert.equal('humidityPaths' in ext, false)
+  assert.equal('combine' in ext, false)
+  assert.equal(button(p.tree, 'Add another humidity sensor'), null, 'one sensor per unit')
   assert.equal(ext.minOnMinutes, 2)
   assert.equal(ext.hysteresisOn, 3)
   assert.equal(ext.onSensorLoss, 'internal')

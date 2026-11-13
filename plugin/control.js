@@ -35,8 +35,7 @@ const RETRY_MS = 30 * 1000
 
 const DEFAULTS = {
   enabled: false,
-  humidityPaths: [],
-  combine: 'max',
+  humidityPath: '',
   temperaturePath: '',
   minTemperature: 5,
   hysteresisOn: 3,
@@ -61,14 +60,15 @@ function cleanPath(p) {
 /** Normalize the per-device "External control" options. */
 function normalizeControlConfig(raw) {
   const c = raw && typeof raw === 'object' ? raw : {}
-  let paths = c.humidityPaths
-  if (typeof paths === 'string') paths = paths.split(',')
-  if (!Array.isArray(paths)) paths = c.humidityPath ? [c.humidityPath] : []
-  paths = [...new Set(paths.map(cleanPath).filter(Boolean))]
+  // One sensor per unit. Older 0.1.0 drafts kept a list (humidityPaths): keep its first path.
+  let humidityPath = cleanPath(c.humidityPath)
+  if (!humidityPath) {
+    const list = Array.isArray(c.humidityPaths) ? c.humidityPaths : String(c.humidityPaths || '').split(',')
+    humidityPath = list.map(cleanPath).find(Boolean) || ''
+  }
   return {
     enabled: c.enabled === true,
-    humidityPaths: paths,
-    combine: c.combine === 'average' ? 'average' : 'max',
+    humidityPath,
     temperaturePath: cleanPath(c.temperaturePath),
     minTemperature: num(c.minTemperature, DEFAULTS.minTemperature, -20, 40),
     hysteresisOn: num(c.hysteresisOn, DEFAULTS.hysteresisOn, 0, 20),
@@ -131,7 +131,9 @@ class ExternalController {
     this.saved = p.saved && typeof p.saved === 'object' ? { ...p.saved } : null
     this.inControl = false
     this.expectedPower = null
-    this.lastSwitchAt = null
+    // After a restart: the power the controller had chosen and when it last switched.
+    this.resumePower = typeof p.power === 'boolean' ? p.power : null
+    this.lastSwitchAt = Number.isFinite(Number(p.lastSwitchAt)) && p.lastSwitchAt !== null ? Number(p.lastSwitchAt) : null
     this.graceUntil = 0
     this.pausedUntil = 0
     this.retryAt = 0
@@ -141,11 +143,14 @@ class ExternalController {
     this.dirty = false
     this.range = null
     this.status = { state: this.mode === 'external' ? 'starting' : 'internal', reason: '' }
-    this.last = { humidity: null, temperature: null, sources: [] }
+    this.last = { humidity: null, temperature: null }
   }
 
   persisted() {
-    return { mode: this.mode, target: this.target, saved: this.saved }
+    const out = { mode: this.mode, target: this.target, saved: this.saved }
+    if (this.mode === 'external' && typeof this.expectedPower === 'boolean') out.power = this.expectedPower
+    if (this.mode === 'external' && this.lastSwitchAt !== null) out.lastSwitchAt = this.lastSwitchAt
+    return out
   }
 
   markDirty() {
@@ -253,14 +258,11 @@ class ExternalController {
     this.retryAt = now + RETRY_MS
   }
 
-  /** Combine the humidity readings (percent) that are still fresh. */
-  combine(readings, now) {
-    const staleMs = this.config.staleMinutes * MIN
-    const fresh = (readings || []).filter((r) => r && r.value !== null && r.value !== undefined && Number.isFinite(r.at) && now - r.at <= staleMs)
-    if (!fresh.length) return { value: null, sources: [] }
-    const values = fresh.map((r) => r.value)
-    const value = this.config.combine === 'average' ? values.reduce((a, b) => a + b, 0) / values.length : Math.max(...values)
-    return { value, sources: fresh.map((r) => r.path) }
+  /** The reading's value if it is still fresh, else null. */
+  fresh(reading, now) {
+    const r = reading
+    if (!r || r.value === null || r.value === undefined || !Number.isFinite(r.value) || !Number.isFinite(r.at)) return null
+    return now - r.at <= this.config.staleMinutes * MIN ? r.value : null
   }
 
   enterCommand(unit) {
@@ -302,17 +304,16 @@ class ExternalController {
    * One control step.
    * @param {number} now
    * @param {object} unit       the runtime's public state
-   * @param {object} readings   { humidity: [{ path, value (percent), at (ms) }], temperature: { path, value (°C), at } | null }
+   * @param {object} readings   { humidity: { path, value (percent), at (ms) } | null, temperature: { path, value (°C), at } | null }
    * @returns {{ commands: object[], status: { state, reason } }}
    */
   tick(now, unit, readings = {}) {
     const commands = []
     const u = unit || {}
     const cfg = this.config
-    const hum = this.combine(readings.humidity, now)
-    const t = readings.temperature
-    const temp = t && t.value !== null && t.value !== undefined && Number.isFinite(t.at) && now - t.at <= cfg.staleMinutes * MIN ? t.value : null
-    this.last = { humidity: hum.value === null ? null : round1(hum.value), temperature: round1(temp), sources: hum.sources }
+    const hum = { value: this.fresh(readings.humidity, now) }
+    const temp = this.fresh(readings.temperature, now)
+    this.last = { humidity: round1(hum.value), temperature: round1(temp) }
     const done = (state, reason) => ({ commands, status: this.setStatus(state, reason) })
 
     if (this.mode !== 'external') {
@@ -387,6 +388,16 @@ class ExternalController {
       this.inControl = true
       this.expectedPower = Boolean(u.power)
       this.graceUntil = now + GRACE_MS
+      // First take-over after a restart: put the unit back to the power the
+      // controller had chosen (a plugin stop may have restored the hygrostat).
+      if (this.resumePower !== null) {
+        const want = this.resumePower
+        this.resumePower = null
+        if (want !== Boolean(u.power) && !(want === false && u.defrost) && !u.tankFull) {
+          commands.push({ power: want })
+          this.expectedPower = want
+        }
+      }
     }
 
     if (u.tankFull) return done('tank-full', 'The tank is full; the unit waits until it is emptied.')
@@ -412,6 +423,7 @@ class ExternalController {
       this.expectedPower = want
       this.lastSwitchAt = now
       this.graceUntil = now + GRACE_MS
+      this.markDirty()
     }
 
     if (cold) return done('too-cold', `${round1(temp)} °C is below ${cfg.minTemperature} °C; the unit stays off.`)
@@ -441,7 +453,6 @@ class ExternalController {
       reason: this.status.reason || strat.reason || '',
       sourceHumidity: this.last.humidity,
       sourceTemperature: this.config.temperaturePath ? this.last.temperature : null,
-      sources: this.last.sources,
       hysteresisOn: this.config.hysteresisOn,
       hysteresisOff: this.config.hysteresisOff,
       pausedUntil: this.pausedUntil > 0 ? this.pausedUntil : null

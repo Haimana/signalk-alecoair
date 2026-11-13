@@ -216,7 +216,7 @@
     }
 
     var EXT_DEFAULTS = {
-      enabled: false, humidityPaths: [], combine: 'max', temperaturePath: '', minTemperature: 5,
+      enabled: false, humidityPath: '', temperaturePath: '', minTemperature: 5,
       hysteresisOn: 3, hysteresisOff: 2, minOnMinutes: 10, minOffMinutes: 10, staleMinutes: 5,
       onSensorLoss: 'internal', manualPauseMinutes: 60
     }
@@ -231,6 +231,10 @@
     function ExternalControl(props) {
       var d = props.device
       var ext = Object.assign({}, EXT_DEFAULTS, d.externalControl || {})
+      // One sensor per unit; a list from an earlier 0.1.0 draft keeps its first path.
+      if (!ext.humidityPath && Array.isArray(ext.humidityPaths)) ext.humidityPath = ext.humidityPaths.filter(Boolean)[0] || ''
+      delete ext.humidityPaths
+      delete ext.combine
       var paths = props.paths || {}
       var ctl = props.control || null
       var humId = 'aa-hum-' + d.key
@@ -241,17 +245,6 @@
         props.onChange(next)
       }
       function setNum(field) { return function (v) { set(field, v === '' ? '' : Number(v)) } }
-      var hp = ext.humidityPaths && ext.humidityPaths.length ? ext.humidityPaths : ['']
-      function setHum(i, v) {
-        var list = hp.slice()
-        list[i] = v.trim()
-        set('humidityPaths', list)
-      }
-      function removeHum(i) {
-        var list = hp.slice()
-        list.splice(i, 1)
-        set('humidityPaths', list)
-      }
       return h('div', { className: 'border-top pt-2 mt-2' },
         h('div', { className: 'fw-semibold small mb-1' }, 'External control'),
         h('p', { className: 'small text-muted mb-2' },
@@ -263,15 +256,8 @@
           ctl.mode === 'external' ? ' \u00b7 ' + ctl.state + (ctl.sourceHumidity != null ? ' \u00b7 ' + ctl.sourceHumidity + '% \u2192 ' + ctl.target + '%' : '') : '',
           ctl.reason ? h('div', { className: 'text-muted' }, ctl.reason) : null) : null,
         ext.enabled ? h('div', { className: 'aa-grid' },
-          hp.map(function (p, i) {
-            return h(Field, { key: 'hp' + i, label: 'Humidity path' + (hp.length > 1 ? ' ' + (i + 1) : ''), className: 'aa-full', help: i === 0 ? 'Signal K ratio 0\u20131 (a percentage is detected too). Pick from the list or type a path.' : null },
-              h('div', { className: 'd-flex gap-1' },
-                h(TextInput, { value: p, list: humId, placeholder: 'environment.inside.<zone>.relativeHumidity', onChange: function (v) { setHum(i, v) } }),
-                hp.length > 1 ? h('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary', onClick: function () { removeHum(i) } }, 'Remove') : null))
-          }),
-          h('div', { className: 'aa-span2 mb-2' },
-            h('button', { type: 'button', className: 'btn btn-sm btn-link p-0', onClick: function () { set('humidityPaths', hp.concat([''])) } }, 'Add another humidity sensor')),
-          hp.length > 1 ? h(Field, { label: 'Several sensors' }, h(Select, { value: ext.combine, onChange: function (v) { set('combine', v) }, options: [{ value: 'max', label: 'Highest' }, { value: 'average', label: 'Average' }] })) : null,
+          h(Field, { label: 'Humidity path', className: 'aa-full', help: 'One sensor. Signal K ratio 0\u20131 (a percentage is detected too). Pick from the list or type a path; several units may use the same sensor.' },
+            h(TextInput, { value: ext.humidityPath, list: humId, placeholder: 'environment.inside.<zone>.relativeHumidity', onChange: function (v) { set('humidityPath', v.trim()) } })),
           h(Field, { label: 'Temperature path (optional)', className: 'aa-full', help: 'Kelvin, as Signal K publishes it. Below the minimum temperature the unit is not started.' },
             h(TextInput, { value: ext.temperaturePath, list: tempId, placeholder: 'environment.inside.<zone>.temperature', onChange: function (v) { set('temperaturePath', v.trim()) } })),
           h(Field, { label: 'Do not start below (\u00b0C)' }, h(TextInput, { type: 'number', value: ext.minTemperature, onChange: setNum('minTemperature') })),

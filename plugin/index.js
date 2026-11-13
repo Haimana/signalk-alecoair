@@ -173,7 +173,7 @@ module.exports = function factory(app, injected = {}) {
     return {
       configured: true,
       ...entry.control.publicStatus(unitState || entry.runtime.getPublicState()),
-      humidityPaths: ext.humidityPaths,
+      humidityPath: ext.humidityPath || null,
       temperaturePath: ext.temperaturePath || null,
       minTemperature: ext.minTemperature,
       onSensorLoss: ext.onSensorLoss,
@@ -524,10 +524,8 @@ module.exports = function factory(app, injected = {}) {
 
   function readings(entry) {
     const ext = entry.cfg.externalControl
-    const humidity = ext.humidityPaths.map((p) => {
-      const r = readSensor(p)
-      return r ? { path: p, value: toPercent(r.value), at: r.at } : { path: p, value: null, at: NaN }
-    })
+    const h = ext.humidityPath ? readSensor(ext.humidityPath) : null
+    const humidity = h ? { path: ext.humidityPath, value: toPercent(h.value), at: h.at } : null
     let temperature = null
     if (ext.temperaturePath) {
       const r = readSensor(ext.temperaturePath)
@@ -576,7 +574,7 @@ module.exports = function factory(app, injected = {}) {
     if (!ext.enabled || !entry.control) {
       throw new Error('External control is not set up for this unit. Enable it in Signal K Admin → Plugin Config → AlecoAir → External control.')
     }
-    if (!ext.humidityPaths.length && (body.mode === 'external' || body.enabled === true)) {
+    if (!ext.humidityPath && (body.mode === 'external' || body.enabled === true)) {
       throw new Error('No external humidity path is configured for this unit.')
     }
     const unit = entry.runtime.getPublicState()
@@ -991,8 +989,7 @@ module.exports = function factory(app, injected = {}) {
                 title: 'External control (humidity from another Signal K sensor)',
                 properties: {
                   enabled: { type: 'boolean', title: 'Allow external control (switch it on in the WebApp)', default: false },
-                  humidityPaths: { type: 'array', title: 'Humidity paths (ratio 0–1 or %)', items: { type: 'string' } },
-                  combine: { type: 'string', title: 'Several sensors', enum: ['max', 'average'], default: 'max' },
+                  humidityPath: { type: 'string', title: 'Humidity path (one sensor; ratio 0–1 or %). Several units may share it.' },
                   temperaturePath: { type: 'string', title: 'Temperature path (optional, K)' },
                   minTemperature: { type: 'number', title: 'Do not start below (°C)', default: 5 },
                   hysteresisOn: { type: 'number', title: 'On at target + (% RH)', default: 3 },
