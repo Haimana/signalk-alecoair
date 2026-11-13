@@ -413,3 +413,23 @@ test('persisted state from 0.1.0 without power: the unit\'s current power is kep
   r.humidity(50)
   assert.deepEqual(r.tick().commands, [])
 })
+
+test('restart during a manual-change pause: the pause continues, nothing is sent', () => {
+  const h = harness({ minOnMinutes: 0, manualPauseMinutes: 60 })
+  h.ctl.enable(h.unit, 50)
+  h.humidity(60); h.tick()
+  h.advance(MIN); h.tick()
+  h.unit.mode = 'auto'; h.unit.targetHumidity = 50
+  h.advance(MIN)
+  assert.equal(h.tick().status.state, 'manual-pause')
+  assert.equal(h.ctl.takeDirty(), true)
+  const saved = JSON.parse(JSON.stringify(h.ctl.persisted()))
+  assert.equal(saved.pausedUntil, h.now + 60 * MIN)
+  const r = harness({ minOnMinutes: 0 }, saved, { mode: 'auto', targetHumidity: 50, power: true })
+  r.advance(10 * MIN); r.humidity(60)
+  const out = r.tick()
+  assert.deepEqual(out.commands, [])
+  assert.equal(out.status.state, 'manual-pause')
+  r.advance(52 * MIN)
+  assert.deepEqual(r.tick().commands, [{ mode: 'continuous' }], 'takes over when the pause ends')
+})

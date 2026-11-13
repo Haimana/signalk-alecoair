@@ -135,7 +135,8 @@ class ExternalController {
     this.resumePower = typeof p.power === 'boolean' ? p.power : null
     this.lastSwitchAt = Number.isFinite(Number(p.lastSwitchAt)) && p.lastSwitchAt !== null ? Number(p.lastSwitchAt) : null
     this.graceUntil = 0
-    this.pausedUntil = 0
+    // A manual-change pause survives a restart.
+    this.pausedUntil = this.mode === 'external' && Number.isFinite(Number(p.pausedUntil)) ? Number(p.pausedUntil) : 0
     this.retryAt = 0
     this.lossApplied = false
     this.coldLatched = false
@@ -150,6 +151,7 @@ class ExternalController {
     const out = { mode: this.mode, target: this.target, saved: this.saved }
     if (this.mode === 'external' && typeof this.expectedPower === 'boolean') out.power = this.expectedPower
     if (this.mode === 'external' && this.lastSwitchAt !== null) out.lastSwitchAt = this.lastSwitchAt
+    if (this.mode === 'external' && this.pausedUntil > 0) out.pausedUntil = this.pausedUntil
     return out
   }
 
@@ -365,6 +367,7 @@ class ExternalController {
       if (powerChanged || !this.inControlMode(u)) {
         this.inControl = false
         this.pausedUntil = now + cfg.manualPauseMinutes * MIN
+        this.markDirty()
         if (cfg.manualPauseMinutes > 0) {
           return done('manual-pause', `The unit was changed by hand. External control resumes in ${fmtMin(cfg.manualPauseMinutes * MIN)}.`)
         }
