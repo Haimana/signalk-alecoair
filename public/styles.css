@@ -154,8 +154,15 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   align-items: center;
   gap: 0;
   min-height: 0;
-  padding: 0 0 4px 68px; /* with the 32 px panel padding: 100 px before the gauge */
+  justify-content: center;
+  padding: 0 0 4px;
 }
+/* Desktop: the group [gauge][−/+][modes + status] is centred in the card, so the
+   free space left of the gauge equals the free space right of the modes on every
+   unit, whatever its mode count. The two spacers keep at least 68 px (+ the 32 px
+   panel padding = 100 px) each side; on a narrow card they shrink equally (huge
+   shrink factor, so they give way first) and the modes wrap only once they are 0. */
+.panel-main::before, .panel-main::after { content: ''; flex: 0 100000 68px; min-width: 0; }
 /* Desktop spacing: gauge → −/+ 64 px, −/+ → first mode button 38 px on every unit.
    The modes column is as wide as its mode row; the status row is centred under it
    and does not widen the column (width 0 + min-width 100%). */
@@ -280,7 +287,7 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
 .step:not(:disabled):hover { color: #fff; filter: var(--glow); }
 
 .side {
-  flex: 0 1 auto;
+  flex: 0 1 auto; /* shrinks (modes wrap) only once the spacers are used up */
   min-width: 0;
   align-self: stretch;
   display: flex;
@@ -314,8 +321,8 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   left: 50%;
   bottom: 0;
   transform: translateX(-50%);
-  width: 560px;
-  max-width: 560px;
+  width: min(560px, calc(100% + 40px)); /* stays inside the card when it is centred */
+  max-width: none;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -429,6 +436,7 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   .panel { width: 100%; min-height: 0; border-radius: 24px; padding: 18px 18px 20px; }
   .name { font-size: 11px; letter-spacing: 0.2em; }
   .panel-main { flex-direction: column; align-items: stretch; gap: 10px; padding: 4px 0 0; }
+  .panel-main::before, .panel-main::after { content: none; }
   .steppers { flex-direction: row; gap: 24px; margin-right: 0; }
   .dial { margin-right: 0; }
   .side { flex: 1 1 auto; }

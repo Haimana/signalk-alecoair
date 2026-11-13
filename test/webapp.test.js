@@ -98,10 +98,12 @@ test('gauge: thin background arc and a thicker current-humidity arc (no dots); -
   assert.ok(dim && Number(dim[1]) >= 0.35, 'unlit elements are clearly visible')
 })
 
-test('desktop spacing: 100 px before the gauge, constant -/+ to first mode gap; phone resets it', () => {
+test('desktop spacing: group centred with >= 100 px each side, constant -/+ to first mode gap; phone resets it', () => {
   const pad = css.match(/\.panel \{[^}]*padding: \d+px (\d+)px/)
-  const main = css.match(/\.panel-main \{[^}]*padding: 0 0 4px (\d+)px/)
-  assert.ok(pad && main && Number(pad[1]) + Number(main[1]) === 100, 'gauge starts 100 px from the card edge')
+  const spacer = css.match(/\.panel-main::before, \.panel-main::after \{ content: ''; flex: 0 (\d+) (\d+)px; min-width: 0; \}/)
+  assert.ok(/\.panel-main \{[^}]*justify-content: center;[^}]*padding: 0 0 4px;/.test(css), 'group centred in the card')
+  assert.ok(pad && spacer && Number(pad[1]) + Number(spacer[2]) === 100 && Number(spacer[1]) >= 1000, '100 px each side, spacers give way first')
+  assert.ok(/@media \(max-width: 760px\)[\s\S]*\.panel-main::before, \.panel-main::after \{ content: none; \}/.test(css), 'no spacers on the phone')
   assert.ok(/\.steppers \{ margin-right: 38px; \}/.test(css) && /\.side \{\s*flex: 0 1 auto/.test(css), 'constant gap to a modes column sized to its mode row')
   assert.ok(/\.side > \.extras \{ width: 0; min-width: 100%; \}/.test(css), 'status row does not widen the modes column')
   assert.ok(/@media \(max-width: 760px\)[\s\S]*\.dial \{ margin-right: 0; \}/.test(css), 'phone layout unchanged')

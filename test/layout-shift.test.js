@@ -119,7 +119,7 @@ const MEASURE = `(() => {
   return JSON.stringify(out)
 })()`
 
-test('messages and the page banner never move the gauge, -/+, modes or status icons (desktop and phone)', { skip: !CHROME && 'no Chrome/Chromium found', timeout: 90000 }, async () => {
+test('messages and the page banner never move the gauge, -/+, modes or status icons (desktop 1280 + 1024 and phone)', { skip: !CHROME && 'no Chrome/Chromium found', timeout: 90000 }, async () => {
   const { st, server, port } = await fakeServer()
   const cdp = launch()
   try {
@@ -142,7 +142,7 @@ test('messages and the page banner never move the gauge, -/+, modes or status ic
     const refresh = (key) => evaluate(`views.get('${key}').refresh().then(() => true)`)
     const msg = (key) => evaluate(`(() => { const m = document.querySelector('#device-${key} .msg'); return { show: m.classList.contains('show'), text: m.textContent, title: m.title } })()`)
 
-    for (const [name, width, height, mobile] of [['desktop', 1280, 800, false], ['phone', 390, 844, true]]) {
+    for (const [name, width, height, mobile] of [['desktop', 1280, 800, false], ['desktop 1024', 1024, 768, false], ['phone', 390, 844, true]]) {
       st.D = units()
       st.fail = false
       await s('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile })
@@ -183,6 +183,62 @@ test('messages and the page banner never move the gauge, -/+, modes or status ic
       await refresh('d13')
       assert.equal((await msg('d13')).show, false)
       assert.deepEqual(await measure(), base, `${name}: hiding messages does not move anything`)
+    }
+  } finally {
+    cdp.close()
+    server.close()
+  }
+})
+
+const BALANCE = `(() => {
+  const out = {}
+  for (const p of document.querySelectorAll('.panel[data-key]')) {
+    const pr = p.getBoundingClientRect()
+    const vis = [...p.querySelectorAll('.ring, .end, .step, .mode, .fan, .stat, .ext-stat')]
+      .filter((e) => e.getBoundingClientRect().width > 0 && !e.closest('[hidden]'))
+    const L = Math.min(...vis.map((e) => e.getBoundingClientRect().left))
+    const R = Math.max(...vis.map((e) => e.getBoundingClientRect().right))
+    const b = (s) => p.querySelector(s).getBoundingClientRect()
+    const m = b('.msg')
+    out[p.dataset.key] = {
+      left: Math.round(L - pr.left), right: Math.round(pr.right - R),
+      gaugeToStep: Math.round(b('.step-plus').left - b('.ring').right),
+      stepToMode: Math.round(b('.mode').left - b('.step-plus').right),
+      modeRows: new Set([...p.querySelectorAll('.mode')].map((e) => Math.round(e.getBoundingClientRect().top))).size,
+      msgInside: m.left >= pr.left && m.right <= pr.right
+    }
+  }
+  return JSON.stringify(out)
+})()`
+
+test('desktop: the gauge / -/+ / modes group is centred in every card (equal free space left and right)', { skip: !CHROME && 'no Chrome/Chromium found', timeout: 90000 }, async () => {
+  const { st, server, port } = await fakeServer()
+  const cdp = launch()
+  try {
+    const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank' })
+    const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true })
+    const s = (m, p) => cdp.send(m, p, sessionId)
+    const evaluate = async (expression) => {
+      const res = await s('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
+      if (res.exceptionDetails) throw new Error(res.exceptionDetails.exception ? res.exceptionDetails.exception.description : res.exceptionDetails.text)
+      return res.result.value
+    }
+    st.D = units()
+    st.D.d16.control = { ...st.D.d16.control, state: 'sensor-missing', reason: 'No fresh external humidity for 5 min: the unit runs on its own hygrostat.' }
+    for (const width of [1024, 1100, 1280, 1600]) {
+      await s('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false })
+      await s('Page.navigate', { url: `http://127.0.0.1:${port}/signalk-alecoair/` })
+      for (let i = 0; i < 100 && !(await evaluate("document.querySelectorAll('.panel[data-key] .mode').length === 9 && document.querySelector('#device-d16 .msg.show') !== null")); i++) await sleep(100)
+      const got = JSON.parse(await evaluate(BALANCE))
+      for (const [key, g] of Object.entries(got)) {
+        const at = `${width} px, ${key}: ${JSON.stringify(g)}`
+        assert.ok(Math.abs(g.left - g.right) <= 1, `left == right (${at})`)
+        assert.ok(g.left >= (width >= 1280 ? 100 : 32), `margin floor (${at})`)
+        assert.equal(g.gaugeToStep, 64, `gauge -> -/+ (${at})`)
+        assert.equal(g.stepToMode, 38, `-/+ -> first mode (${at})`)
+        assert.equal(g.modeRows, 1, `modes on one row (${at})`)
+        assert.ok(g.msgInside, `message stays inside the card (${at})`)
+      }
     }
   } finally {
     cdp.close()
