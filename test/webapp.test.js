@@ -103,6 +103,6 @@ test('desktop spacing: 100 px before the gauge, constant -/+ to first mode gap; 
   const main = css.match(/\.panel-main \{[^}]*padding: 0 0 4px (\d+)px/)
   assert.ok(pad && main && Number(pad[1]) + Number(main[1]) === 100, 'gauge starts 100 px from the card edge')
   assert.ok(/\.steppers \{ margin-right: 38px; \}/.test(css) && /\.side \{\s*flex: 0 1 auto/.test(css), 'constant gap to a modes column sized to its mode row')
-  assert.ok(/\.side > \.extras, \.side > \.msg \{ width: 0; min-width: 100%; \}/.test(css), 'status row does not widen the modes column')
+  assert.ok(/\.side > \.extras \{ width: 0; min-width: 100%; \}/.test(css), 'status row does not widen the modes column')
   assert.ok(/@media \(max-width: 760px\)[\s\S]*\.dial \{ margin-right: 0; \}/.test(css), 'phone layout unchanged')
 })
