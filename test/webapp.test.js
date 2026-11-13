@@ -98,14 +98,15 @@ test('gauge: thin background arc and a thicker current-humidity arc (no dots); -
   assert.ok(dim && Number(dim[1]) >= 0.35, 'unlit elements are clearly visible')
 })
 
-test('desktop spacing: group centred with >= 100 px each side, constant -/+ to first mode gap; phone resets it', () => {
+test('desktop spacing: gauge and -/+ at a fixed left offset on every card, modes centred in the rest; phone resets it', () => {
   const pad = css.match(/\.panel \{[^}]*padding: \d+px (\d+)px/)
-  const spacer = css.match(/\.panel-main::before, \.panel-main::after \{ content: ''; flex: 0 (\d+) (\d+)px; min-width: 0; \}/)
-  assert.ok(/\.panel-main \{[^}]*justify-content: center;[^}]*padding: 0 0 4px;/.test(css), 'group centred in the card')
-  assert.ok(pad && spacer && Number(pad[1]) + Number(spacer[2]) === 100 && Number(spacer[1]) >= 1000, '100 px each side, spacers give way first')
-  assert.ok(/@media \(max-width: 760px\)[\s\S]*\.panel-main::before, \.panel-main::after \{ content: none; \}/.test(css), 'no spacers on the phone')
-  assert.ok(/\.steppers \{ margin-right: 38px; \}/.test(css) && /\.side \{\s*flex: 0 1 auto/.test(css), 'constant gap to a modes column sized to its mode row')
-  assert.ok(/\.side > \.fan \{ width: 0; min-width: 100%; \}/.test(css), 'fan row does not widen the modes column')
+  const left = css.match(/--gauge-left: clamp\((\d+)px, [^;]*, (\d+)px\);/)
+  assert.ok(/\.panel-main \{[^}]*padding: 0 0 4px var\(--gauge-left\);/.test(css), 'fixed left offset, not centred per card')
+  assert.ok(pad && left && Number(pad[1]) + Number(left[2]) === 100, '100 px from the card edge to the gauge on wide screens')
+  assert.equal(/\.panel-main::before|justify-content: center;\s*padding: 0 0 4px;/.test(css), false, 'no per-card centring of the whole row')
+  assert.ok(/\.dial \{ margin-right: 64px; \}/.test(css) && /\.steppers \{ margin-right: 0; \}/.test(css), 'gauge -> -/+ 64 px')
+  assert.ok(/\.side \{\s*flex: 1 1 0;/.test(css) && /\.side \{[^}]*align-items: center/.test(css), 'modes column takes the rest and is centred in it')
+  assert.ok(/@media \(max-width: 760px\)[\s\S]*\.panel-main \{[^}]*padding: 4px 0 0;/.test(css), 'phone: no left offset')
   assert.ok(/@media \(max-width: 760px\)[\s\S]*\.dial \{ margin-right: 0; \}/.test(css), 'phone layout unchanged')
 })
 

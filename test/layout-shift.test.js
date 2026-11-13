@@ -194,18 +194,17 @@ const BALANCE = `(() => {
   const out = {}
   for (const p of document.querySelectorAll('.panel[data-key]')) {
     const pr = p.getBoundingClientRect()
-    const vis = [...p.querySelectorAll('.ring, .end, .step, .mode, .fan, .stat, .ext-stat')]
-      .filter((e) => e.getBoundingClientRect().width > 0 && !e.closest('[hidden]'))
-    const L = Math.min(...vis.map((e) => e.getBoundingClientRect().left))
-    const R = Math.max(...vis.map((e) => e.getBoundingClientRect().right))
+    const ms = [...p.querySelectorAll('.mode')].map((e) => e.getBoundingClientRect())
+    const innerRight = pr.right - parseFloat(getComputedStyle(p).paddingRight)
     const b = (s) => p.querySelector(s).getBoundingClientRect()
     const m = b('.msg')
     const st = [...p.querySelectorAll('.stat')].filter((e) => !e.closest('[hidden]')).map((e) => e.getBoundingClientRect())
     out[p.dataset.key] = {
-      left: Math.round(L - pr.left), right: Math.round(pr.right - R),
+      gaugeX: Math.round(b('.ring').left - pr.left),
       gaugeToStep: Math.round(b('.step-plus').left - b('.ring').right),
-      stepToMode: Math.round(b('.mode').left - b('.step-plus').right),
-      modeRows: new Set([...p.querySelectorAll('.mode')].map((e) => Math.round(e.getBoundingClientRect().top))).size,
+      modesLeft: Math.round(Math.min(...ms.map((x) => x.left)) - b('.step-plus').right),
+      modesRight: Math.round(innerRight - Math.max(...ms.map((x) => x.right))),
+      modeRows: new Set(ms.map((x) => Math.round(x.top))).size,
       msgInside: m.left >= pr.left && m.right <= pr.right,
       statRows: new Set(st.map((x) => Math.round(x.top))).size,
       statLeft: Math.round(Math.min(...st.map((x) => x.left)) - pr.left),
@@ -216,7 +215,7 @@ const BALANCE = `(() => {
   return JSON.stringify(out)
 })()`
 
-test('desktop: the gauge / -/+ / modes group and the status row are centred in every card', { skip: !CHROME && 'no Chrome/Chromium found', timeout: 90000 }, async () => {
+test('desktop: gauge at the same x on every card, modes centred in the rest, status row centred', { skip: !CHROME && 'no Chrome/Chromium found', timeout: 90000 }, async () => {
   const { st, server, port } = await fakeServer()
   const cdp = launch()
   try {
@@ -235,12 +234,14 @@ test('desktop: the gauge / -/+ / modes group and the status row are centred in e
       await s('Page.navigate', { url: `http://127.0.0.1:${port}/signalk-alecoair/` })
       for (let i = 0; i < 100 && !(await evaluate("document.querySelectorAll('.panel[data-key] .mode').length === 9 && document.querySelector('#device-d16 .msg.show') !== null")); i++) await sleep(100)
       const got = JSON.parse(await evaluate(BALANCE))
+      const xs = new Set(Object.values(got).map((g) => g.gaugeX))
+      assert.equal(xs.size, 1, `gauge at the same x on every card whatever the mode count (${width} px: ${JSON.stringify(got)})`)
+      if (width >= 1280) assert.equal([...xs][0], 100, 'gauge 100 px from the card edge on wide screens')
       for (const [key, g] of Object.entries(got)) {
         const at = `${width} px, ${key}: ${JSON.stringify(g)}`
-        assert.ok(Math.abs(g.left - g.right) <= 1, `left == right (${at})`)
-        assert.ok(g.left >= (width >= 1280 ? 100 : 32), `margin floor (${at})`)
         assert.equal(g.gaugeToStep, 64, `gauge -> -/+ (${at})`)
-        assert.equal(g.stepToMode, 38, `-/+ -> first mode (${at})`)
+        assert.ok(Math.abs(g.modesLeft - g.modesRight) <= 1, `modes centred between the -/+ and the card's right padding (${at})`)
+        assert.ok(g.modesLeft >= 16, `room between the -/+ and the modes (${at})`)
         assert.equal(g.modeRows, 1, `modes on one row (${at})`)
         assert.ok(g.msgInside, `message stays inside the card (${at})`)
         assert.equal(g.statRows, 1, `status labels on one row (${at})`)
