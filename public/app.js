@@ -17,6 +17,12 @@
  * on the left; on the right, Power, a working-mode dropdown with fan speed
  * on the same row, and a fixed two-column settings grid replace the bar and
  * the sheets, so every model gets the same card height.
+ *
+ * External sensor: when the unit has external control set up in Admin, an
+ * "External sensor" switch sits with the settings. While it is on, the ring
+ * shows the external humidity (the unit's own reading is shown smaller), −/+
+ * change the controller target (kept by the plugin, not sent to the unit) and
+ * a status line says what the controller is doing.
  */
 
 const PLUGIN_ID = 'signalk-alecoair'
@@ -28,6 +34,22 @@ const SCALE = { min: 20, max: 90 }
 const TARGET_DEBOUNCE_MS = 700
 // Same breakpoint as styles.css: wide cards with the controls expanded on the right.
 const WIDE = window.matchMedia('(min-width: 960px)')
+const EXT_STATE = {
+  starting: 'Starting',
+  running: 'Running',
+  idle: 'Idle, below target',
+  waiting: 'Waiting (minimum time)',
+  defrost: 'Defrost',
+  'manual-pause': 'Paused after a manual change',
+  'sensor-missing': 'Sensor missing',
+  'too-cold': 'Too cold',
+  'tank-full': 'Tank full',
+  offline: 'Unit offline',
+  unsupported: 'Not supported on this unit',
+  error: 'Command failed, retrying',
+  internal: 'Off'
+}
+const EXT_RANGE = { min: 20, max: 90 }
 const POWER_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg>'
 
 const page = {
@@ -113,6 +135,8 @@ class DeviceView {
     this.pendingCommand = null
     this.hold = null
     this.targetTimer = null
+    this.extHold = null
+    this.extBusy = false
     this.sideSig = ''
     this.root = page.template.content.firstElementChild.cloneNode(true)
     this.root.id = sectionId(this.key)
@@ -159,9 +183,60 @@ class DeviceView {
     return (this.state && this.state.humidityRange) || { min: 30, max: 80, step: 5 }
   }
 
+  /** External control state, with a pending target or switch shown at once. */
+  ext(next) {
+    const ctl = { ...((next || this.state || {}).control || {}) }
+    const hold = this.extHold
+    if (hold && Date.now() < hold.until) {
+      if (hold.target !== undefined) {
+        if (Number(ctl.target) === hold.target) delete hold.target
+        else ctl.target = hold.target
+      }
+      if (hold.mode !== undefined) {
+        if (ctl.mode === hold.mode) delete hold.mode
+        else ctl.mode = hold.mode
+      }
+      if (hold.target === undefined && hold.mode === undefined) this.extHold = null
+    } else this.extHold = null
+    ctl.active = Boolean(ctl.configured && ctl.mode === 'external')
+    return ctl
+  }
+
+  /** External sensor switch and controller target (POST /control; nothing is sent to the unit directly). */
+  async setControl(body) {
+    this.extHold = { until: Date.now() + 8000, ...(this.extHold || {}), ...body }
+    if (this.state) this.render({ ...this.state })
+    if (this.extBusy) return
+    this.extBusy = true
+    try {
+      const res = await apiFetch(`/devices/${encodeURIComponent(this.key)}/control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+      const data = await readJson(res)
+      if (!res.ok) throw new Error(authError(res, data))
+      this.render(data)
+    } catch (err) {
+      this.extHold = null
+      setBanner(this.el.banner, err.message, 'error')
+    } finally {
+      this.extBusy = false
+    }
+  }
+
   /** −/+ move the target right away on screen and send one command once the taps stop. */
   stepTarget(dir) {
     if (!this.state) return
+    const ctl = this.ext()
+    if (ctl.active) {
+      const target = clamp(Number(ctl.target || 50) + dir, EXT_RANGE.min, EXT_RANGE.max)
+      this.extHold = { ...(this.extHold || {}), until: Date.now() + 8000, target }
+      this.render({ ...this.state })
+      clearTimeout(this.targetTimer)
+      this.targetTimer = setTimeout(() => this.setControl({ target }), TARGET_DEBOUNCE_MS)
+      return
+    }
     const r = this.range()
     const continuous = this.state.mode === 'continuous' && !(this.hold && this.hold.fields.targetHumidity !== undefined)
     const base = continuous ? (dir > 0 ? r.min - r.step : r.max + r.step) : Number(this.state.targetHumidity || 50)
@@ -197,15 +272,20 @@ class DeviceView {
     e.modePill.disabled = !connected
 
     // Ring: arc = indoor humidity, knob and big gold number = target.
-    const r = this.range()
-    const rh = Number(next.humidity)
-    const hasRh = s.humidity && next.humidity !== null && Number.isFinite(rh)
-    const continuous = next.mode === 'continuous'
-    const target = Number(next.targetHumidity || 50)
+    // External sensor on: arc = external humidity, target = controller target.
+    const ctl = this.ext(next)
+    const extOn = ctl.active
+    const r = extOn ? { ...EXT_RANGE, step: 1 } : this.range()
+    const unitRh = Number(next.humidity)
+    const hasUnitRh = s.humidity && next.humidity !== null && Number.isFinite(unitRh)
+    const rh = extOn ? Number(ctl.sourceHumidity) : unitRh
+    const hasRh = extOn ? ctl.sourceHumidity !== null && ctl.sourceHumidity !== undefined && Number.isFinite(rh) : hasUnitRh
+    const continuous = !extOn && next.mode === 'continuous'
+    const target = extOn ? Number(ctl.target || 50) : Number(next.targetHumidity || 50)
     const rhPct = hasRh ? clamp((rh - SCALE.min) / (SCALE.max - SCALE.min), 0, 1) : 0
     e.arc.setAttribute('stroke-dasharray', `${RING_ARC * rhPct} ${RING_LEN}`)
     e.arc.style.stroke = next.tankFull ? 'var(--alert)' : (hasRh && rh > target && !continuous ? 'var(--teal)' : 'var(--blue)')
-    const showTarget = c.targetHumidity && !continuous
+    const showTarget = extOn || (c.targetHumidity && !continuous)
     const kp = ringPoint(clamp((target - SCALE.min) / (SCALE.max - SCALE.min), 0, 1))
     e.knob.setAttribute('cx', kp.x.toFixed(1))
     e.knob.setAttribute('cy', kp.y.toFixed(1))
@@ -215,16 +295,23 @@ class DeviceView {
     if (showTarget) e.target.innerHTML = `${Math.round(target)}<sup>%</sup>`
     else if (c.targetHumidity && continuous) e.target.textContent = 'CO'
     else e.target.innerHTML = hasRh ? `${Math.round(rh)}<sup>%</sup>` : '—'
-    e.indoor.textContent = showTarget || continuous
-      ? `Indoor humidity ${hasRh ? `${Math.round(rh)}%` : '—'}`
-      : 'indoor humidity'
-    show(e.minus, c.targetHumidity)
-    show(e.plus, c.targetHumidity)
+    if (extOn) {
+      e.indoor.textContent = `External ${hasRh ? `${Math.round(rh)}%` : '—'} · unit ${hasUnitRh ? `${Math.round(unitRh)}%` : '—'}`
+    } else {
+      e.indoor.textContent = showTarget || continuous
+        ? `Indoor humidity ${hasRh ? `${Math.round(rh)}%` : '—'}`
+        : 'indoor humidity'
+    }
+    show(e.minus, c.targetHumidity || extOn)
+    show(e.plus, c.targetHumidity || extOn)
+    e.minus.setAttribute('aria-label', extOn ? 'Lower external target' : 'Lower target humidity')
+    e.plus.setAttribute('aria-label', extOn ? 'Raise external target' : 'Raise target humidity')
     e.minus.disabled = !connected || (showTarget && target <= r.min)
     e.plus.disabled = !connected || (showTarget && target >= r.max)
 
     const facts = []
-    if (on && s.compressor) facts.push(next.compressor ? 'Compressor running' : 'Waiting for the hygrostat')
+    if (on && s.compressor && !extOn) facts.push(next.compressor ? 'Compressor running' : 'Waiting for the hygrostat')
+    if (on && extOn) facts.push(next.defrost ? 'Defrost' : 'Compressor running')
     if (!on) facts.push('Off')
     if (s.powerWatts && next.powerWatts !== null && next.powerWatts !== undefined) facts.push(`≈${Math.round(next.powerWatts)} W`)
     if (c.timer && next.timerHours > 0) {
@@ -233,6 +320,15 @@ class DeviceView {
     }
     if (next.childLock) facts.push('Child lock')
     e.facts.textContent = facts.join(' · ')
+
+    show(e.ext, extOn)
+    if (extOn) {
+      const label = EXT_STATE[ctl.state] || ctl.state || '—'
+      const temp = ctl.sourceTemperature !== null && ctl.sourceTemperature !== undefined ? ` · ${Number(ctl.sourceTemperature).toFixed(1)} °C` : ''
+      e.ext.textContent = `External sensor · ${label}${temp}`
+      e.ext.title = ctl.reason || ''
+      e.ext.dataset.state = ctl.state || ''
+    }
 
     e.tankAlert.textContent = `${next.tankLitersMax ? `The ${next.tankLitersMax} L tank` : 'The tank'} is full. The unit has stopped.`
     e.tankAlert.classList.toggle('show', Boolean(next.tankFull))
@@ -303,6 +399,10 @@ class DeviceView {
           return `<div class="side-tile"><span data-s="timerLabel">Timer</span>
             <div class="stepper mini"><button type="button" data-s="timerMinus" aria-label="Shorter timer">−</button><b data-s="timerValue">Off</b><button type="button" data-s="timerPlus" aria-label="Longer timer">+</button></div></div>`
         }
+        if (item === 'external') {
+          return `<div class="side-tile" title="Control the unit from an external Signal K humidity sensor"><span>External sensor</span>
+            <button type="button" class="switch" role="switch" aria-label="External sensor" data-ext="1"></button></div>`
+        }
         const label = { childLock: 'Child lock', sleep: 'Sleep', insideDry: 'Inside dry' }[item]
         const tip = { childLock: 'Locks the buttons on the unit', sleep: 'Sleep', insideDry: 'Dries the unit inside after use' }[item]
         return `<div class="side-tile" title="${tip}"><span>${label}</span>
@@ -331,6 +431,7 @@ class DeviceView {
         const k = b.dataset.toggle
         this.command({ [k]: !(this.state && this.state[k]) })
       }))
+      if (q('[data-ext]')) q('[data-ext]').addEventListener('click', () => this.setControl({ mode: this.ext().active ? 'internal' : 'external' }))
       if (q('[data-s=timerMinus]')) {
         q('[data-s=timerMinus]').addEventListener('click', () => this.command({ timerHours: Math.max(0, (Number(this.state.timerHours) || 0) - 1) }))
         q('[data-s=timerPlus]').addEventListener('click', () => this.command({ timerHours: Math.min(this.state.timerMaxHours || 24, (Number(this.state.timerHours) || 0) + 1) }))
@@ -344,7 +445,10 @@ class DeviceView {
       b.disabled = !connected
       b.setAttribute('aria-pressed', String(on))
       q('[data-s=powerLabel]').textContent = on ? 'On' : 'Off'
-      q('[data-s=powerSub]').textContent = !connected ? 'Not connected' : !on ? 'The unit is off' : next.compressor ? 'Compressor running' : 'On, waiting for the hygrostat'
+      const ctl = this.ext(next)
+      q('[data-s=powerSub]').textContent = !connected ? 'Not connected'
+        : ctl.active ? `External sensor: ${(EXT_STATE[ctl.state] || ctl.state || '—').toLowerCase()}`
+          : !on ? 'The unit is off' : next.compressor ? 'Compressor running' : 'On, waiting for the hygrostat'
     }
     if (q('[data-s=modeBtn]')) {
       q('[data-s=modeValue]').textContent = modeLabel(next)
@@ -368,6 +472,13 @@ class DeviceView {
       b.setAttribute('aria-checked', String(v))
       b.disabled = !connected
     })
+    if (q('[data-ext]')) {
+      const b = q('[data-ext]')
+      const v = this.ext(next).active
+      b.classList.toggle('on', v)
+      b.setAttribute('aria-checked', String(v))
+      b.disabled = !connected
+    }
     if (q('[data-s=timerValue]')) {
       const h = Number(next.timerHours) || 0
       const left = Math.round(Number(next.timerRemainingMin) || 0)
@@ -435,6 +546,7 @@ function settingsItems(view) {
   if (c.childLock) items.push('childLock')
   if (c.sleep && !sleepIsMode) items.push('sleep')
   if (c.insideDry) items.push('insideDry')
+  if (st.control && st.control.configured) items.push('external')
   return items
 }
 
@@ -592,6 +704,10 @@ function renderSheet() {
         body.appendChild(toggleRow('Sleep', st.sleep, () => view.command({ sleep: !st.sleep })))
       } else if (item === 'insideDry') {
         body.appendChild(toggleRow('Inside dry', st.insideDry, () => view.command({ insideDry: !st.insideDry }), 'Dries the unit inside after use'))
+      } else if (item === 'external') {
+        const ctl = view.ext()
+        body.appendChild(toggleRow('External sensor', ctl.active, () => view.setControl({ mode: ctl.active ? 'internal' : 'external' }),
+          ctl.active ? (ctl.reason || EXT_STATE[ctl.state] || '') : 'Control the unit from an external Signal K humidity sensor'))
       }
     }
     const note = document.createElement('p')

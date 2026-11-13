@@ -12,15 +12,20 @@ const { isLanIp } = require('./scan')
 const alecoair = require('./alecoair')
 const storeLib = require('./store')
 const config = require('./config')
+const { ExternalController, controlStrategy, toPercent, toCelsius } = require('./control')
 
 const { PLUGIN_ID, PROTOCOLS } = config
 const OPENAPI = path.join(__dirname, '..', 'openapi.json')
+const CONTROL_TICK_MS = 5000
+const TEST_SENSOR_FILE = 'signalk-alecoair.test-sensor.json'
+const TEST_SENSOR_SOURCE = 'signalk-alecoair-test'
+const TEST_PATH_RE = /^environment\.inside\.test\.[A-Za-z0-9_.]+$/
 
 function loadOpenApi() {
   try {
     return JSON.parse(fs.readFileSync(OPENAPI, 'utf8'))
   } catch {
-    return { openapi: '3.0.0', info: { title: 'AlecoAir', version: '0.0.3' } }
+    return { openapi: '3.0.0', info: { title: 'AlecoAir', version: pkg.version } }
   }
 }
 
@@ -48,6 +53,8 @@ module.exports = function factory(app, injected = {}) {
   let migration = null
   const devices = new Map()
   const putPaths = new Set()
+  const sensorSeen = new Map()
+  let testSensorTimer = null
   let running = false
 
   const plugin = {
@@ -112,6 +119,26 @@ module.exports = function factory(app, injected = {}) {
     return devices.values().next().value || null
   }
 
+  /** Runtime state plus the name and the external-control status. */
+  function publicDeviceState(entry) {
+    const s = entry.runtime.getPublicState()
+    return { ...s, name: entry.cfg.name, control: controlState(entry, s) }
+  }
+
+  function controlState(entry, unitState) {
+    const ext = entry.cfg.externalControl || {}
+    if (!ext.enabled || !entry.control) return { configured: false, available: false, mode: 'internal' }
+    return {
+      configured: true,
+      ...entry.control.publicStatus(unitState || entry.runtime.getPublicState()),
+      humidityPaths: ext.humidityPaths,
+      temperaturePath: ext.temperaturePath || null,
+      minTemperature: ext.minTemperature,
+      onSensorLoss: ext.onSensorLoss,
+      log: (entry.controlLog || []).slice(-20)
+    }
+  }
+
   function deviceSummary(entry) {
     const s = entry.runtime.getPublicState()
     return {
@@ -147,15 +174,26 @@ module.exports = function factory(app, injected = {}) {
 
     read.get('/devices/:key/state', (req, res) => {
       const entry = withDevice(req, res)
-      if (entry) res.json({ ...entry.runtime.getPublicState(), name: entry.cfg.name })
+      if (entry) res.json(publicDeviceState(entry))
     })
 
     write.post('/devices/:key/command', async (req, res) => {
       const entry = withDevice(req, res)
       if (!entry) return
       try {
-        const next = await entry.runtime.command(req.body || {})
-        res.json({ ...next, name: entry.cfg.name })
+        await entry.runtime.command(req.body || {})
+        res.json(publicDeviceState(entry))
+      } catch (err) {
+        res.status(400).json({ error: err.message || String(err) })
+      }
+    })
+
+    write.post('/devices/:key/control', async (req, res) => {
+      const entry = withDevice(req, res)
+      if (!entry) return
+      try {
+        await setControl(entry, req.body || {})
+        res.json(publicDeviceState(entry))
       } catch (err) {
         res.status(400).json({ error: err.message || String(err) })
       }
@@ -165,7 +203,7 @@ module.exports = function factory(app, injected = {}) {
     read.get('/state', (req, res) => {
       const entry = getEntry()
       if (!entry) return res.status(503).json({ error: 'No device is configured.', devices: [] })
-      res.json({ ...entry.runtime.getPublicState(), name: entry.cfg.name })
+      res.json(publicDeviceState(entry))
     })
 
     write.post('/command', async (req, res) => {
@@ -190,6 +228,10 @@ module.exports = function factory(app, injected = {}) {
     // ---- Setup API: admin only (registered without access(), so Signal K keeps its admin-only default) ----
     router.get('/setup/status', (_req, res) => {
       res.json(setupStatus())
+    })
+
+    router.get('/setup/paths', (_req, res) => {
+      res.json(sensorPaths())
     })
 
     router.get('/setup/profiles', (_req, res) => {
@@ -325,6 +367,7 @@ module.exports = function factory(app, injected = {}) {
             reportedDps: learned.reportedDps || []
           },
           state: entry ? entry.runtime.getPublicState() : null,
+          control: entry ? controlState(entry) : null,
           diagnostics: diag
         }
       })
@@ -366,6 +409,270 @@ module.exports = function factory(app, injected = {}) {
         }
       })
     }
+  }
+
+  // ---------- External-sensor control ----------
+
+  /**
+   * Latest value of a self path from any source except this plugin (so a
+   * unit's own humidity, published as cabin humidity, never feeds back).
+   * `at` is the Signal K timestamp; without one, the time the value last changed.
+   */
+  function readSensor(skPath) {
+    if (!skPath || typeof app.getSelfPath !== 'function') return null
+    let node
+    try {
+      node = app.getSelfPath(skPath)
+    } catch {
+      return null
+    }
+    if (!node || typeof node !== 'object') return null
+    const cands = []
+    if (node.values && typeof node.values === 'object') {
+      for (const [source, v] of Object.entries(node.values)) {
+        if (v && typeof v === 'object') cands.push({ source, value: v.value, timestamp: v.timestamp })
+      }
+    }
+    if (!cands.length) cands.push({ source: node.$source, value: node.value, timestamp: node.timestamp })
+    const ok = cands.filter((c) => c.source !== plugin.id && typeof c.value === 'number' && Number.isFinite(c.value))
+    if (!ok.length) return null
+    const ts = (c) => { const t = Date.parse(c.timestamp); return Number.isFinite(t) ? t : 0 }
+    ok.sort((a, b) => ts(b) - ts(a))
+    const best = ok[0]
+    let at = ts(best)
+    if (!at) {
+      const key = `${skPath}|${best.source}`
+      const seen = sensorSeen.get(key)
+      if (!seen || seen.value !== best.value) sensorSeen.set(key, { value: best.value, at: Date.now() })
+      at = sensorSeen.get(key).at
+    }
+    return { value: best.value, at, source: best.source || null }
+  }
+
+  /** Humidity and temperature paths for the Admin picklists (this plugin's own unit paths left out). */
+  function sensorPaths() {
+    let all = []
+    try {
+      if (app.streambundle && typeof app.streambundle.getAvailablePaths === 'function') all = app.streambundle.getAvailablePaths() || []
+    } catch {
+      all = []
+    }
+    const own = options.devices.map((d) => d.paths.prefix)
+    const rows = [...new Set(all.map(String))].filter((p) => !own.some((pre) => p === pre || p.startsWith(`${pre}.`))).sort()
+    const describe = (p) => {
+      const r = readSensor(p)
+      return { path: p, value: r ? r.value : null, source: r ? r.source : null }
+    }
+    return {
+      humidity: rows.filter((p) => /humidity/i.test(p)).map(describe),
+      temperature: rows.filter((p) => /^environment\..*temperature$/i.test(p)).map(describe)
+    }
+  }
+
+  function controlLog(entry, item) {
+    entry.controlLog = entry.controlLog || []
+    entry.controlLog.push({ at: new Date().toISOString(), ...item })
+    if (entry.controlLog.length > 40) entry.controlLog.splice(0, entry.controlLog.length - 40)
+  }
+
+  function saveControl(entry) {
+    ensureStore()
+    store.control = { ...(store.control || {}), [entry.cfg.key]: entry.control.persisted() }
+    persistStore()
+  }
+
+  function readings(entry) {
+    const ext = entry.cfg.externalControl
+    const humidity = ext.humidityPaths.map((p) => {
+      const r = readSensor(p)
+      return r ? { path: p, value: toPercent(r.value), at: r.at } : { path: p, value: null, at: NaN }
+    })
+    let temperature = null
+    if (ext.temperaturePath) {
+      const r = readSensor(ext.temperaturePath)
+      temperature = r ? { path: ext.temperaturePath, value: toCelsius(r.value), at: r.at } : null
+    }
+    return { humidity, temperature }
+  }
+
+  async function sendControlCommands(entry, commands, why) {
+    for (const cmd of commands) {
+      try {
+        await entry.runtime.command(cmd)
+        controlLog(entry, { command: cmd, why, ok: true })
+        debug(`${entry.cfg.key}: external control sent ${JSON.stringify(cmd)} (${why})`)
+      } catch (err) {
+        controlLog(entry, { command: cmd, why, ok: false, error: err.message || String(err) })
+        app.error(`${entry.cfg.key}: external control could not send ${JSON.stringify(cmd)}: ${err.message || String(err)}`)
+        if (entry.control) entry.control.commandFailed(Date.now())
+        return false
+      }
+    }
+    return true
+  }
+
+  async function runControl(entry) {
+    if (!entry.control || entry.controlBusy || devices.get(entry.cfg.key) !== entry) return
+    entry.controlBusy = true
+    try {
+      const ctl = entry.control
+      const unit = entry.runtime.getPublicState()
+      const before = ctl.status.state
+      const { commands, status } = ctl.tick(Date.now(), unit, readings(entry))
+      if (commands.length) await sendControlCommands(entry, commands, status.state)
+      else if (status.state !== before) controlLog(entry, { state: status.state, reason: status.reason })
+      if (ctl.takeDirty()) saveControl(entry)
+      publishControl(entry)
+    } catch (err) {
+      app.error(`${entry.cfg.key}: external control: ${err.message || String(err)}`)
+    } finally {
+      entry.controlBusy = false
+    }
+  }
+
+  async function setControl(entry, body) {
+    const ext = entry.cfg.externalControl || {}
+    if (!ext.enabled || !entry.control) {
+      throw new Error('External control is not set up for this unit. Enable it in Signal K Admin → Plugin Config → AlecoAir → External control.')
+    }
+    if (!ext.humidityPaths.length && (body.mode === 'external' || body.enabled === true)) {
+      throw new Error('No external humidity path is configured for this unit.')
+    }
+    const unit = entry.runtime.getPublicState()
+    const mode = body.mode !== undefined ? String(body.mode) : (body.enabled !== undefined ? (body.enabled ? 'external' : 'internal') : undefined)
+    if (mode !== undefined && mode !== 'external' && mode !== 'internal') throw new Error('mode must be internal or external.')
+    if (mode === 'external') {
+      const strat = controlStrategy(unit)
+      if (unit.connected && !strat.strategy) throw new Error(strat.reason)
+    }
+    // Wait for a running tick so the two never send at the same time.
+    for (let i = 0; i < 50 && entry.controlBusy; i++) await new Promise((r) => setTimeout(r, 100))
+    if (body.target !== undefined) entry.control.setTarget(body.target)
+    if (mode === 'external') entry.control.enable(unit)
+    else if (mode === 'internal') entry.control.disable()
+    controlLog(entry, { request: { mode, target: body.target } })
+    if (entry.control.takeDirty()) saveControl(entry)
+    await runControl(entry)
+  }
+
+  function controlPaths(prefix) {
+    const root = `${prefix}.control`
+    return {
+      mode: `${root}.mode`,
+      target: `${root}.target`,
+      state: `${root}.state`,
+      reason: `${root}.reason`,
+      sourceHumidity: `${root}.sourceHumidity`,
+      sourceTemperature: `${root}.sourceTemperature`
+    }
+  }
+
+  function publishControl(entry) {
+    if (!entry.cfg.externalControl.enabled || !entry.control) return
+    const st = entry.control.publicStatus(entry.runtime.getPublicState())
+    const p = controlPaths(entry.cfg.paths.prefix)
+    const values = [
+      { path: p.mode, value: st.mode },
+      { path: p.target, value: st.target === null ? null : Number((st.target / 100).toFixed(4)) },
+      { path: p.state, value: st.state },
+      { path: p.reason, value: st.reason },
+      { path: p.sourceHumidity, value: st.sourceHumidity === null ? null : Number((st.sourceHumidity / 100).toFixed(4)) }
+    ]
+    if (entry.cfg.externalControl.temperaturePath) {
+      values.push({ path: p.sourceTemperature, value: st.sourceTemperature === null ? null : Number((st.sourceTemperature + 273.15).toFixed(2)) })
+    }
+    const sig = JSON.stringify(values)
+    const now = Date.now()
+    if (sig === entry.controlSig && now - (entry.controlSigAt || 0) < 60000) return
+    entry.controlSig = sig
+    entry.controlSigAt = now
+    app.handleMessage(plugin.id, { updates: [{ values }] })
+    updateStatus()
+  }
+
+  function publishControlMeta(entry) {
+    const p = controlPaths(entry.cfg.paths.prefix)
+    const name = entry.cfg.name
+    const meta = [
+      { path: p.mode, value: { description: `${name}: internal (unit hygrostat) | external (external humidity sensor)`, displayName: 'Control mode', type: 'multiple', possibleValues: [{ title: 'Unit hygrostat', value: 'internal' }, { title: 'External sensor', value: 'external' }] } },
+      { path: p.target, value: { units: 'ratio', description: `${name}: target for the external humidity`, displayName: 'External target' } },
+      { path: p.state, value: { description: `${name}: external control state`, displayName: 'Control state' } },
+      { path: p.reason, value: { description: `${name}: why the external control is in this state`, displayName: 'Control reason' } },
+      { path: p.sourceHumidity, value: { units: 'ratio', description: `${name}: external humidity used for control`, displayName: 'External humidity' } }
+    ]
+    if (entry.cfg.externalControl.temperaturePath) {
+      meta.push({ path: p.sourceTemperature, value: { units: 'K', description: `${name}: external temperature used for control`, displayName: 'External temperature' } })
+    }
+    app.handleMessage(plugin.id, { updates: [{ meta }] })
+  }
+
+  function registerControlPuts(entry) {
+    if (typeof app.registerPutHandler !== 'function') return
+    const p = controlPaths(entry.cfg.paths.prefix)
+    const key = entry.cfg.key
+    const handlers = { [p.mode]: (v) => ({ mode: v }), [p.target]: (v) => ({ target: v }) }
+    for (const [skPath, toBody] of Object.entries(handlers)) {
+      if (putPaths.has(skPath)) continue
+      putPaths.add(skPath)
+      app.registerPutHandler('vessels.self', skPath, (_context, _p, value, cb) => {
+        const current = devices.get(key)
+        if (!current) return { state: 'COMPLETED', statusCode: 503, message: 'Device is not running.' }
+        setControl(current, toBody(value)).then(() => cb({ state: 'COMPLETED', statusCode: 200 }))
+          .catch((err) => cb({ state: 'COMPLETED', statusCode: 400, message: err.message }))
+        return { state: 'PENDING' }
+      })
+    }
+  }
+
+  function startControl(entry) {
+    const ext = entry.cfg.externalControl
+    const persisted = (store.control || {})[entry.cfg.key] || null
+    const leftover = persisted && (persisted.mode === 'external' || persisted.saved)
+    if (!ext.enabled && !leftover) return
+    entry.control = new ExternalController(ext, persisted || {})
+    // External control switched off in Admin while it was on: give the unit its hygrostat back once.
+    if (!ext.enabled) entry.control.disable()
+    if (ext.enabled) {
+      publishControlMeta(entry)
+      registerControlPuts(entry)
+    }
+    entry.controlTimer = setInterval(() => { runControl(entry) }, CONTROL_TICK_MS)
+    if (entry.controlTimer.unref) entry.controlTimer.unref()
+  }
+
+  async function stopControl(entry) {
+    if (entry.controlTimer) clearInterval(entry.controlTimer)
+    entry.controlTimer = null
+    if (!entry.control) return
+    for (let i = 0; i < 30 && entry.controlBusy; i++) await new Promise((r) => setTimeout(r, 100))
+    const commands = entry.control.stopCommands(entry.runtime.getPublicState())
+    if (!commands.length) return
+    const timeout = new Promise((r) => { const t = setTimeout(r, 4000); if (t.unref) t.unref() })
+    await Promise.race([sendControlCommands(entry, commands, 'plugin stop'), timeout])
+  }
+
+  /**
+   * Test hook for a simulated external sensor: while
+   * <configPath>/plugin-config-data/signalk-alecoair.test-sensor.json exists,
+   * its numeric values for environment.inside.test.* paths are published
+   * every 2 s (source signalk-alecoair-test). Delete the file to stop; the
+   * values then go stale like a dead sensor.
+   */
+  function startTestSensor() {
+    const file = path.join(ensureDataRoot(), TEST_SENSOR_FILE)
+    testSensorTimer = setInterval(() => {
+      let raw
+      try {
+        raw = JSON.parse(fs.readFileSync(file, 'utf8'))
+      } catch {
+        return
+      }
+      const values = Object.entries(raw || {})
+        .filter(([p, v]) => TEST_PATH_RE.test(p) && typeof v === 'number' && Number.isFinite(v))
+        .map(([p, v]) => ({ path: p, value: v }))
+      if (values.length) app.handleMessage(TEST_SENSOR_SOURCE, { updates: [{ $source: TEST_SENSOR_SOURCE, timestamp: new Date().toISOString(), values }] })
+    }, 2000)
+    if (testSensorTimer.unref) testSensorTimer.unref()
   }
 
   function publishMeta(entry) {
@@ -437,7 +744,12 @@ module.exports = function factory(app, injected = {}) {
       if (!s.connected) return `${d.key}: disconnected${s.lastError ? ` (${s.lastError})` : ''}`
       const rh = s.humidity === null ? '' : ` · ${s.humidity}% RH`
       const w = s.powerWatts === null ? '' : ` · ${s.powerWatts} W`
-      return `${d.key}: ${s.power ? 'ON' : 'OFF'}${rh}${w}`
+      let ext = ''
+      if (entry.control && d.externalControl.enabled && entry.control.mode === 'external') {
+        const st = entry.control.publicStatus(s)
+        ext = ` · external ${st.state}${st.sourceHumidity === null ? '' : ` ${st.sourceHumidity}%`}→${st.target}%`
+      }
+      return `${d.key}: ${s.power ? 'ON' : 'OFF'}${rh}${w}${ext}`
     })
     app.setPluginStatus(parts.join(' | '))
   }
@@ -508,6 +820,7 @@ module.exports = function factory(app, injected = {}) {
 
     publishMeta(entry)
     registerPuts(entry)
+    startControl(entry)
     runtime.start().then(() => {
       debug(`${cfg.key} started (${cfg.simulate ? 'simulator' : 'Tuya LAN'}, profile ${codec.profile.id})`)
     }).catch((err) => app.error(`${cfg.key}: ${err.message || String(err)}`))
@@ -565,12 +878,16 @@ module.exports = function factory(app, injected = {}) {
     const active = options.devices.filter((d) => d.enabled && !d.problems.length)
     const noIpCount = active.filter((d) => !d.ip && !d.simulate).length
     for (const cfg of active) startDevice(cfg, noIpCount)
+    startTestSensor()
     updateStatus()
   }
 
   async function stop() {
     running = false
+    if (testSensorTimer) clearInterval(testSensorTimer)
+    testSensorTimer = null
     const all = [...devices.values()]
+    await Promise.all(all.map((e) => stopControl(e).catch(() => {})))
     devices.clear()
     putPaths.clear()
     await Promise.all(all.map((e) => e.runtime.stop()))
@@ -626,6 +943,24 @@ module.exports = function factory(app, injected = {}) {
                   electrical: { type: 'string', title: 'Estimated power path (empty = off)' },
                   publishCabinHumidity: { type: 'boolean', title: 'Also publish cabin humidity', default: false },
                   cabinHumidity: { type: 'string', title: 'Cabin humidity path' }
+                }
+              },
+              externalControl: {
+                type: 'object',
+                title: 'External control (humidity from another Signal K sensor)',
+                properties: {
+                  enabled: { type: 'boolean', title: 'Allow external control (switch it on in the WebApp)', default: false },
+                  humidityPaths: { type: 'array', title: 'Humidity paths (ratio 0–1 or %)', items: { type: 'string' } },
+                  combine: { type: 'string', title: 'Several sensors', enum: ['max', 'average'], default: 'max' },
+                  temperaturePath: { type: 'string', title: 'Temperature path (optional, K)' },
+                  minTemperature: { type: 'number', title: 'Do not start below (°C)', default: 5 },
+                  hysteresisOn: { type: 'number', title: 'On at target + (% RH)', default: 3 },
+                  hysteresisOff: { type: 'number', title: 'Off at target − (% RH)', default: 2 },
+                  minOnMinutes: { type: 'number', title: 'Minimum on time (min)', default: 10 },
+                  minOffMinutes: { type: 'number', title: 'Minimum off time (min)', default: 10 },
+                  staleMinutes: { type: 'number', title: 'Sensor counts as lost after (min)', default: 5 },
+                  onSensorLoss: { type: 'string', title: 'When the sensor is lost', enum: ['internal', 'off'], default: 'internal' },
+                  manualPauseMinutes: { type: 'number', title: 'Pause after a manual change (min)', default: 60 }
                 }
               }
             }

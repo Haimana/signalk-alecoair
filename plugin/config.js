@@ -14,6 +14,7 @@ const path = require('path')
 const { ROLES, PROFILES, getProfile } = require('./profiles')
 const { isLanIp } = require('./scan')
 const { slugKey, isValidKey, camelKey } = require('./util')
+const { normalizeControlConfig } = require('./control')
 
 const PLUGIN_ID = 'signalk-alecoair'
 const LEGACY_PLUGIN_ID = 'signalk-alecoair-d13'
@@ -177,7 +178,8 @@ function normalizeDevice(d = {}, index = 0) {
       electrical: paths.electrical ? String(paths.electrical) : '',
       publishCabinHumidity: paths.publishCabinHumidity === true,
       cabinHumidity: String(paths.cabinHumidity || 'environment.inside.relativeHumidity')
-    }
+    },
+    externalControl: normalizeControlConfig(d.externalControl)
   }
 }
 

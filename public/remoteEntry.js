@@ -184,6 +184,7 @@
         placeholder: props.placeholder,
         readOnly: props.readOnly,
         autoComplete: props.autoComplete,
+        list: props.list,
         onChange: function (e) { props.onChange && props.onChange(e.target.value) }
       })
     }
@@ -212,6 +213,80 @@
         h('div', { className: 'card-header d-flex justify-content-between align-items-center' },
           h('strong', null, props.title), props.actions || null),
         h('div', { className: 'card-body aa-c' }, props.children))
+    }
+
+    var EXT_DEFAULTS = {
+      enabled: false, humidityPaths: [], combine: 'max', temperaturePath: '', minTemperature: 5,
+      hysteresisOn: 3, hysteresisOff: 2, minOnMinutes: 10, minOffMinutes: 10, staleMinutes: 5,
+      onSensorLoss: 'internal', manualPauseMinutes: 60
+    }
+
+    function fmtValue(row, kind) {
+      if (!row || row.value == null || typeof row.value !== 'number') return ''
+      if (kind === 'humidity') return (row.value > 1.5 ? row.value : row.value * 100).toFixed(0) + '%'
+      return (row.value >= 150 ? row.value - 273.15 : row.value).toFixed(1) + ' \u00b0C'
+    }
+
+    /** "External control" settings of one unit. The switch itself is in the WebApp (or control.mode). */
+    function ExternalControl(props) {
+      var d = props.device
+      var ext = Object.assign({}, EXT_DEFAULTS, d.externalControl || {})
+      var paths = props.paths || {}
+      var ctl = props.control || null
+      var humId = 'aa-hum-' + d.key
+      var tempId = 'aa-temp-' + d.key
+      function set(field, value) {
+        var next = Object.assign({}, ext)
+        next[field] = value
+        props.onChange(next)
+      }
+      function setNum(field) { return function (v) { set(field, v === '' ? '' : Number(v)) } }
+      var hp = ext.humidityPaths && ext.humidityPaths.length ? ext.humidityPaths : ['']
+      function setHum(i, v) {
+        var list = hp.slice()
+        list[i] = v.trim()
+        set('humidityPaths', list)
+      }
+      function removeHum(i) {
+        var list = hp.slice()
+        list.splice(i, 1)
+        set('humidityPaths', list)
+      }
+      return h('div', { className: 'border-top pt-2 mt-2' },
+        h('div', { className: 'fw-semibold small mb-1' }, 'External control'),
+        h('p', { className: 'small text-muted mb-2' },
+          'Drive this unit from another Signal K humidity sensor: the plugin puts the unit in its continuous mode (CO on the Traditio) and switches it on and off around the target you set in the WebApp. ',
+          'Allow it here, then switch on \u201cExternal sensor\u201d on the unit\u2019s card in the WebApp (or PUT ', h('code', null, d.paths.prefix + '.control.mode'), ' = external).'),
+        h(Check, { id: 'ext-' + d.key, label: 'Allow external control', checked: ext.enabled, onChange: function (v) { set('enabled', v) } }),
+        ctl && ctl.configured ? h('div', { className: 'small mb-2 ' + (ctl.mode === 'external' ? 'text-success' : 'text-muted') },
+          'Now: ', ctl.mode === 'external' ? 'external' : 'unit hygrostat',
+          ctl.mode === 'external' ? ' \u00b7 ' + ctl.state + (ctl.sourceHumidity != null ? ' \u00b7 ' + ctl.sourceHumidity + '% \u2192 ' + ctl.target + '%' : '') : '',
+          ctl.reason ? h('div', { className: 'text-muted' }, ctl.reason) : null) : null,
+        ext.enabled ? h('div', { className: 'aa-grid' },
+          hp.map(function (p, i) {
+            return h(Field, { key: 'hp' + i, label: 'Humidity path' + (hp.length > 1 ? ' ' + (i + 1) : ''), className: 'aa-full', help: i === 0 ? 'Signal K ratio 0\u20131 (a percentage is detected too). Pick from the list or type a path.' : null },
+              h('div', { className: 'd-flex gap-1' },
+                h(TextInput, { value: p, list: humId, placeholder: 'environment.inside.<zone>.relativeHumidity', onChange: function (v) { setHum(i, v) } }),
+                hp.length > 1 ? h('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary', onClick: function () { removeHum(i) } }, 'Remove') : null))
+          }),
+          h('div', { className: 'aa-span2 mb-2' },
+            h('button', { type: 'button', className: 'btn btn-sm btn-link p-0', onClick: function () { set('humidityPaths', hp.concat([''])) } }, 'Add another humidity sensor')),
+          hp.length > 1 ? h(Field, { label: 'Several sensors' }, h(Select, { value: ext.combine, onChange: function (v) { set('combine', v) }, options: [{ value: 'max', label: 'Highest' }, { value: 'average', label: 'Average' }] })) : null,
+          h(Field, { label: 'Temperature path (optional)', className: 'aa-full', help: 'Kelvin, as Signal K publishes it. Below the minimum temperature the unit is not started.' },
+            h(TextInput, { value: ext.temperaturePath, list: tempId, placeholder: 'environment.inside.<zone>.temperature', onChange: function (v) { set('temperaturePath', v.trim()) } })),
+          h(Field, { label: 'Do not start below (\u00b0C)' }, h(TextInput, { type: 'number', value: ext.minTemperature, onChange: setNum('minTemperature') })),
+          h(Field, { label: 'On at target + (% RH)' }, h(TextInput, { type: 'number', value: ext.hysteresisOn, onChange: setNum('hysteresisOn') })),
+          h(Field, { label: 'Off at target \u2212 (% RH)' }, h(TextInput, { type: 'number', value: ext.hysteresisOff, onChange: setNum('hysteresisOff') })),
+          h(Field, { label: 'Minimum on time (min)' }, h(TextInput, { type: 'number', value: ext.minOnMinutes, onChange: setNum('minOnMinutes') })),
+          h(Field, { label: 'Minimum off time (min)' }, h(TextInput, { type: 'number', value: ext.minOffMinutes, onChange: setNum('minOffMinutes') })),
+          h(Field, { label: 'Sensor lost after (min)' }, h(TextInput, { type: 'number', value: ext.staleMinutes, onChange: setNum('staleMinutes') })),
+          h(Field, { label: 'Pause after a manual change (min)' }, h(TextInput, { type: 'number', value: ext.manualPauseMinutes, onChange: setNum('manualPauseMinutes') })),
+          h(Field, { label: 'When the sensor is lost', className: 'aa-span2' }, h(Select, {
+            value: ext.onSensorLoss, onChange: function (v) { set('onSensorLoss', v) },
+            options: [{ value: 'internal', label: 'Back to the unit\u2019s own hygrostat' }, { value: 'off', label: 'Switch the unit off' }]
+          }))) : null,
+        h('datalist', { id: humId }, (paths.humidity || []).map(function (r) { return h('option', { key: r.path, value: r.path, label: [fmtValue(r, 'humidity'), r.source].filter(Boolean).join(' \u00b7 ') }) })),
+        h('datalist', { id: tempId }, (paths.temperature || []).map(function (r) { return h('option', { key: r.path, value: r.path, label: [fmtValue(r, 'temperature'), r.source].filter(Boolean).join(' \u00b7 ') }) })))
     }
 
     function Inspector(props) {
@@ -379,6 +454,7 @@
           h(Field, { label: 'Estimated power path (empty = off)', className: 'aa-span2' }, h(TextInput, { value: d.paths.electrical, onChange: function (v) { setPath('electrical', v.trim()) } })),
           h('div', { className: 'aa-span2 pt-1' }, h(Check, { id: 'cab-' + d.key, label: 'Also publish the unit\u2019s humidity as cabin humidity', checked: d.paths.publishCabinHumidity, onChange: function (v) { setPath('publishCabinHumidity', v) } })),
           h(Field, { label: 'Cabin humidity path', className: 'aa-span2' }, h(TextInput, { value: d.paths.cabinHumidity, onChange: function (v) { setPath('cabinHumidity', v.trim()) } }))),
+        h(ExternalControl, { device: d, paths: props.sensorPaths, control: st.control, onChange: function (x) { set('externalControl', x) } }),
         inspectState[0] && st.running ? h(Inspector, { device: d, status: status, onChange: function (o) { set('dpOverrides', o) } }) : null)
     }
 
@@ -410,6 +486,11 @@
           }
         }).catch(function (e) { note('warning', e.message) })
       }
+
+      var pathsState = useState(null)
+      useEffect(function () {
+        api('/setup/paths').then(function (p) { pathsState[1](p) }).catch(function () { pathsState[1](null) })
+      }, [])
 
       useEffect(function () {
         refresh()
@@ -600,6 +681,7 @@
             device: d,
             runtime: runtimeByKey[d.key],
             status: status,
+            sensorPaths: pathsState[0],
             onChange: function (n) { updateDevice(i, n) },
             onRemove: function () { removeDevice(i) }
           })

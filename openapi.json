@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "AlecoAir dehumidifiers (signalk-alecoair)",
-    "version": "0.0.3",
+    "version": "0.1.0",
     "description": "Usage API for the WebApp and dashboards, plus the admin-only setup API used by the Plugin Config panel. Local keys are never returned."
   },
   "servers": [{ "url": "/plugins/signalk-alecoair" }],
@@ -44,11 +44,33 @@
         "responses": { "200": { "description": "New state" }, "400": { "description": "Rejected command" } }
       }
     },
+    "/devices/{key}/control": {
+      "post": {
+        "summary": "External-sensor control of one device",
+        "description": "Switch between the unit's own hygrostat (internal) and control from an external Signal K humidity sensor (external), and set the controller target. Needs External control allowed for the device in Plugin Config. The target is kept by the plugin; the unit is put in its continuous mode and switched on and off.",
+        "parameters": [{ "name": "key", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mode": { "type": "string", "enum": ["internal", "external"] },
+                  "target": { "type": "number", "description": "Percent (20–90) or ratio (0.2–0.9)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Device state with control: { configured, available, mode, target, state, reason, sourceHumidity, sourceTemperature, log }" }, "400": { "description": "Rejected (not set up, no sensor path, unit not controllable)" } }
+      }
+    },
     "/state": { "get": { "summary": "Deprecated alias: state of the first device", "responses": { "200": { "description": "Device state" } } } },
     "/command": { "post": { "summary": "Deprecated alias: command the first device", "responses": { "200": { "description": "New state" } } } },
     "/health": { "get": { "summary": "Plugin health", "responses": { "200": { "description": "{ ok, plugin, configured, devices }" } } } },
     "/setup/status": { "get": { "summary": "Admin only: account, discovery, profiles and per-device diagnostics", "responses": { "200": { "description": "Setup status" } } } },
     "/setup/profiles": { "get": { "summary": "Admin only: model profiles and DP roles", "responses": { "200": { "description": "{ profiles, roles }" } } } },
+    "/setup/paths": { "get": { "summary": "Admin only: Signal K humidity and temperature paths for the External control picklists", "responses": { "200": { "description": "{ humidity: [{ path, value, source }], temperature: [...] }" } } } },
     "/setup/login": {
       "post": {
         "summary": "Admin only: sign in to the AlecoAir account once and store each device's local key",

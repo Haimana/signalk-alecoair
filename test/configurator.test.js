@@ -143,3 +143,32 @@ test('configured unit but account forgotten: full setup shows, with the missing-
   assert.ok(has(t, 'No local key stored for this device. Sign in to AlecoAir above.'))
   assert.ok(button(t, 'Sign in'))
 })
+
+test('External control: off by default; allowing it shows the sensor fields and is saved with the unit', async () => {
+  const configuration = { configVersion: 2, devices: [{ key: 'd13', name: 'D13', tuyaId: 'cloudunit0001', enabled: true, profile: 'traditio', protocol: 'auto', paths: { prefix: 'environment.inside.dehumidifier.d13' } }] }
+  const p = await mountPanel({ status: baseStatus({ account: { linked: true, devices: CLOUD }, devices: [{ key: 'd13', running: true, hasLocalKey: true, state: { connected: true } }] }), configuration })
+  let t = p.tree
+  assert.ok(has(t, 'External control'))
+  const allow = inputByLabel(t, 'Allow external control')
+  assert.ok(allow)
+  assert.equal(allow.props.checked, false)
+  assert.equal(inputByLabel(t, 'Humidity path'), null, 'no sensor fields until allowed')
+  assert.ok(p.calls.some((c) => c.url.endsWith('/setup/paths')), 'asks the server for path suggestions')
+  allow.props.onChange({ target: { checked: true } })
+  await settle()
+  t = p.tree
+  const hum = inputByLabel(t, 'Humidity path')
+  assert.ok(hum)
+  assert.equal(hum.props.list, 'aa-hum-d13', 'humidity field offers the Signal K path list')
+  hum.props.onChange({ target: { value: 'environment.inside.relativeHumidity' } })
+  await settle()
+  inputByLabel(p.tree, 'Minimum on time (min)').props.onChange({ target: { value: '2' } })
+  await settle()
+  button(p.tree, 'Save configuration').props.onClick()
+  const ext = p.saved[0].devices[0].externalControl
+  assert.equal(ext.enabled, true)
+  assert.equal(JSON.stringify(ext.humidityPaths), JSON.stringify(['environment.inside.relativeHumidity']))
+  assert.equal(ext.minOnMinutes, 2)
+  assert.equal(ext.hysteresisOn, 3)
+  assert.equal(ext.onSensorLoss, 'internal')
+})

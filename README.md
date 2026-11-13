@@ -7,9 +7,11 @@ Signal K plugin and WebApp for AlecoAir Wi-Fi dehumidifiers over Tuya LAN: sever
 - **Setup only in Signal K Admin**, in the plugin's own configurator: **Apps & Plugins → Configuration → AlecoAir dehumidifiers**.
 - **The WebApp is for use only**: control and monitoring at `http://<signalk>:3000/signalk-alecoair/`.
 
-> Version 0.0.3, an early release: only the D13 Traditio has been verified on a real unit. Pure Node.js: no Python or other system packages.
+> Version 0.1.0 (unreleased), an early release: only the D13 Traditio has been verified on a real unit. Pure Node.js: no Python or other system packages.
 
-**Not included yet:** native widgets for SKIP and automations that drive a unit from another Signal K humidity path (or start a heater). Both are on the roadmap; the plugin today controls and monitors the units you configure.
+- **External sensor control** (optional, per unit): the plugin can drive a unit from another Signal K humidity sensor, with its own target, hysteresis and minimum on/off times. See [External sensor control](#external-sensor-control).
+
+**Not included yet:** native widgets for SKIP, and starting a heater from the plugin. Both are on the roadmap.
 
 This plugin was developed with Grok Bot.
 
@@ -120,6 +122,32 @@ Each card shows the unit's real modes for its profile and only the controls the 
 
 UI labels are in English.
 
+## External sensor control
+
+A dehumidifier's own hygrostat measures the air right next to the unit. With external control, the plugin uses another Signal K humidity sensor instead (for example a BME280 in the saloon) and drives the unit from it.
+
+How it works:
+
+- The unit is put in its **continuous mode**, so its own hygrostat never stops it: on the Traditio that is Continuous (CO), target `25` on DP 2; on the other families it is the profile's continuous mode. The unit's mode and target from before are remembered and restored later.
+- The plugin switches the unit **on** when the external humidity reaches **target + 3%** and **off** at **target − 2%** (both adjustable), with a **minimum on time** and **minimum off time** (10 min each by default) so the compressor is not cycled too often.
+- **Defrost:** the plugin never switches the unit off during a defrost (the manual says not to). It waits until the defrost ends. **Tank full** is left to the unit's firmware.
+- **Manual change:** if the unit is switched or changed by anything other than the controller (the AlecoAir app, the buttons, the WebApp, a Signal K PUT), the controller pauses for 60 min (adjustable), then takes over again.
+- **Sensor lost:** when no fresh value has arrived for 5 min (adjustable), the plugin either gives the unit back its own hygrostat (previous mode and target, power on; the default) or switches it off. It takes over again when the sensor is back.
+- **Temperature (optional):** with a temperature path, the unit is not started below a minimum temperature (default 5 °C) and is stopped when it gets that cold; it restarts 1 °C above the minimum.
+- Switching external control off (or turning it off in Admin) restores the unit's own mode and target and switches it on. When the plugin stops while external control is on, the "sensor lost" choice is applied; after a restart, external control resumes with the same target.
+- A profile without a continuous mode (D16 Purify) uses the lowest hygrostat target the unit accepts plus power on/off instead. Set the external target above that minimum.
+- Values this plugin publishes itself are never used as the external sensor, so a unit's humidity published as cabin humidity cannot feed back.
+
+Setting it up:
+
+1. Signal K Admin → **Apps & Plugins → Configuration → AlecoAir dehumidifiers**, unit card → **External control** → **Allow external control**.
+2. **Humidity path**: pick the sensor's Signal K path from the list (paths with "humidity" that the server has seen, with their current value and source) or type one, e.g. `environment.inside.relativeHumidity`. Signal K publishes relative humidity as a ratio 0–1; a percentage (any value above 1.5) is detected too. Add more sensors if you want; the controller uses the highest (or the average) of the fresh ones.
+3. Optional: **Temperature path** (Kelvin, as Signal K publishes it) and the minimum temperature.
+4. Adjust the hysteresis, minimum times, the stale timeout, the pause after a manual change and what to do when the sensor is lost, or keep the defaults. **Save configuration**.
+5. In the WebApp, switch on **External sensor** on the unit's card (in **Settings** on a phone, in the settings grid on a desktop). The ring then shows the external humidity (the unit's own reading is shown below it, smaller), −/+ change the controller target in 1% steps, and a status line says what the controller is doing: running, idle, waiting (minimum time), defrost, paused after a manual change, sensor missing, too cold or tank full. Hovering the status line shows the reason.
+
+The same can be done from Signal K: `PUT <prefix>.control.mode` = `external` or `internal`, and `PUT <prefix>.control.target` (ratio, e.g. `0.55`).
+
 ## Signal K paths
 
 Each device has its own prefix, taken from its **Key**, not from its Name. Units added in Admin default to `environment.inside.dehumidifier.<key>`. Changing the key in Plugin Config updates that prefix and the default estimated power path immediately and again on Save. A custom prefix is left as you typed it (if it ended with the previous key, only that last segment is replaced).
@@ -131,6 +159,7 @@ Under the prefix, only paths the unit actually has are published:
 - `.humidity` (ratio 0–1), `.temperature` (K), `.tankFull`, `.defrost`, `.faultCode`, `.timerRemaining` (s), `.compressor` (estimated)
 - `.electricalPower` (W, estimated, only when the model's nameplate is known)
 - `notifications.<prefix>.tankFull`
+- With external control allowed: `.control.mode` (`internal` | `external`) and `.control.target` (ratio): **PUT**; `.control.state`, `.control.reason`, `.control.sourceHumidity` (ratio) and, with a temperature path, `.control.sourceTemperature` (K)
 
 `.mode` has `possibleValues` metadata (e.g. `auto`, `continuous`, `sleep` on Traditio). Optional per device: an estimated power path (default `electrical.loads.dehumidifier<Key>.power`) and a cabin humidity path (off by default for new units).
 
@@ -171,6 +200,8 @@ npm test
 ```
 
 Tests use `node --test` and need no hardware or account: fake Tuya LAN devices, the simulator, a fake Signal K app and a local fake of the AlecoAir cloud for the sign-in. Add a profile in `plugin/profiles.js`; mark it `verified: false` until it has been tested on a real unit. Reports and DP maps for the unverified profiles are welcome.
+
+To test external control without a real sensor, write `<configPath>/plugin-config-data/signalk-alecoair.test-sensor.json` on the server, for example `{ "environment.inside.test.relativeHumidity": 0.62 }`. While the file exists, the plugin publishes its values every 2 s (source `signalk-alecoair-test`); only numeric `environment.inside.test.*` paths are accepted. Edit the value to move the humidity, and delete the file to simulate a dead sensor. Use `environment.inside.test.relativeHumidity` as the humidity path in External control.
 
 To treat a known profile as unknown while testing a device report (for example Traditio), set `ALECOAIR_HIDE_PROFILES=traditio` or write the profile id in a `.hide-profiles` file at the plugin root. That file is gitignored; `generic` cannot be hidden. Do not delete the profile from `plugin/profiles.js` for this test.
 

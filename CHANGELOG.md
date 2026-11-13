@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.1.0 (unreleased)
+
+- External sensor control, per unit and off by default: the plugin can drive a unit from another Signal K humidity sensor (one or several paths, highest or average). The unit is put in its continuous mode (CO on the Traditio) and switched on at target + 3% and off at target − 2%, with minimum on and off times (10 min each). No power-off during defrost; a full tank is left to the firmware. A manual change on the unit pauses the controller for 60 min. When the sensor goes stale, the unit gets its own hygrostat back (or is switched off, if you choose). Optional temperature path: the unit is not started below a minimum temperature (default 5 °C). Everything is adjustable in Admin → External control, with picklists of the server's humidity and temperature paths.
+- WebApp: an **External sensor** switch per unit. While it is on, the ring shows the external humidity, −/+ change the controller target and a status line shows what the controller is doing.
+- Signal K: `<prefix>.control.mode` and `<prefix>.control.target` (PUT), plus `control.state`, `control.reason`, `control.sourceHumidity` and `control.sourceTemperature`. REST: `POST /plugins/signalk-alecoair/devices/<key>/control`.
+- Test hook for a simulated sensor: `plugin-config-data/signalk-alecoair.test-sensor.json` publishes `environment.inside.test.*` values while the file exists.
+
 ## 0.0.3
 
 - First Node.js-only release: no Python or other system packages. The AlecoAir account login runs in the plugin and is used once, during setup, to fetch each unit's local key. After that, control stays on the boat LAN (Tuya TCP 6668).

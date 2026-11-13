@@ -94,6 +94,14 @@ button { font: inherit; color: inherit; }
 .round:disabled { opacity: 0.3; cursor: default; }
 
 .facts { margin: 0; text-align: center; color: var(--muted); font-size: 0.82rem; min-height: 1.1em; }
+.ext-line {
+  margin: 0; justify-self: center; text-align: center; font-size: 0.8rem; padding: 4px 12px; border-radius: 999px;
+  color: var(--teal); background: rgba(62, 224, 195, 0.08); border: 1px solid rgba(62, 224, 195, 0.3);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ext-line[data-state="sensor-missing"], .ext-line[data-state="error"], .ext-line[data-state="unsupported"] { color: var(--alert); background: rgba(255, 107, 107, 0.08); border-color: rgba(255, 107, 107, 0.35); }
+.ext-line[data-state="manual-pause"], .ext-line[data-state="too-cold"], .ext-line[data-state="defrost"], .ext-line[data-state="waiting"], .ext-line[data-state="tank-full"] { color: var(--warn); background: rgba(245, 193, 108, 0.08); border-color: rgba(245, 193, 108, 0.35); }
+.ext-line[data-state="idle"] { color: var(--blue); background: rgba(127, 212, 255, 0.08); border-color: rgba(127, 212, 255, 0.3); }
 
 .actions {
   display: flex; justify-content: space-around; gap: 4px;

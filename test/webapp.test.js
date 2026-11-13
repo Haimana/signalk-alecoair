@@ -75,3 +75,15 @@ test('desktop: fixed-height controls panel, same card height for every model', (
   // Built once per control set, then only refreshed, so the 2 s poll does not close the dropdown.
   assert.ok(/if \(sig !== this\.sideSig\)/.test(app), 'side panel is rebuilt only when the control set changes')
 })
+
+test('external sensor: switch with the settings, ring and −/+ follow the controller, status line on the card', () => {
+  assert.ok(html.includes('data-r="ext"'), 'card has the external-control status line')
+  assert.ok(/\/control`/.test(app), 'the switch and target go to the control route, not to the unit')
+  assert.ok(/items\.push\('external'\)/.test(app), 'External sensor is offered with the settings when set up in Admin')
+  assert.ok(/toggleRow\('External sensor'/.test(app), 'phones: switch in the Settings sheet')
+  assert.ok(/data-ext=/.test(app), 'desktop: switch in the settings grid')
+  assert.ok(/sourceHumidity/.test(app), 'ring shows the external humidity')
+  for (const s of ['running', 'idle', 'waiting', 'defrost', 'manual-pause', 'sensor-missing', 'too-cold']) {
+    assert.ok(app.includes(`${s.includes('-') ? `'${s}'` : s}:`), `status label for ${s}`)
+  }
+})
