@@ -100,7 +100,7 @@ button { font: inherit; color: inherit; }
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ext-line[data-state="sensor-missing"], .ext-line[data-state="error"], .ext-line[data-state="unsupported"] { color: var(--alert); background: rgba(255, 107, 107, 0.08); border-color: rgba(255, 107, 107, 0.35); }
-.ext-line[data-state="manual-pause"], .ext-line[data-state="too-cold"], .ext-line[data-state="defrost"], .ext-line[data-state="waiting"], .ext-line[data-state="tank-full"] { color: var(--warn); background: rgba(245, 193, 108, 0.08); border-color: rgba(245, 193, 108, 0.35); }
+.ext-line[data-state="too-cold"], .ext-line[data-state="defrost"], .ext-line[data-state="waiting"], .ext-line[data-state="tank-full"] { color: var(--warn); background: rgba(245, 193, 108, 0.08); border-color: rgba(245, 193, 108, 0.35); }
 .ext-line[data-state="idle"] { color: var(--blue); background: rgba(127, 212, 255, 0.08); border-color: rgba(127, 212, 255, 0.3); }
 
 .actions {

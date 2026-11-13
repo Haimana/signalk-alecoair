@@ -72,7 +72,8 @@ test('config: defaults, ranges, paths as list or comma string', () => {
   assert.equal(c.staleMinutes, 5)
   assert.equal(c.minTemperature, 5)
   assert.equal(c.onSensorLoss, 'internal')
-  assert.equal(c.manualPauseMinutes, 60)
+  assert.equal('manualPauseMinutes' in c, false)
+  assert.equal('manualPauseMinutes' in normalizeControlConfig({ manualPauseMinutes: 60 }), false, 'old field is dropped')
   assert.equal('combine' in c, false, 'one sensor, nothing to combine')
   const d = normalizeControlConfig({ enabled: true, humidityPath: 'vessels.self.environment.inside.a.relativeHumidity', onSensorLoss: 'off', minOnMinutes: -3 })
   assert.equal(d.humidityPath, 'environment.inside.a.relativeHumidity')
@@ -200,33 +201,55 @@ test('stale sensor, fallback off: switched off, but not during defrost', () => {
   assert.deepEqual(r.commands, [{ power: false }])
 })
 
-test('a change on the unit the controller did not make pauses it for the configured time', () => {
-  const h = harness({ minOnMinutes: 0, minOffMinutes: 0, manualPauseMinutes: 60 })
+test('power changed on the unit: external control ends at once, the unit is left as it is', () => {
+  const h = harness({ minOnMinutes: 0, minOffMinutes: 0 })
   h.ctl.enable(h.unit, 50)
   h.humidity(60); h.tick()
   h.advance(MIN); h.tick()
   h.unit.power = false // someone pressed the button
   h.advance(MIN)
   let r = h.tick()
-  assert.deepEqual(r.commands, [])
-  assert.equal(r.status.state, 'manual-pause')
-  h.advance(30 * MIN); r = h.tick()
-  assert.equal(r.status.state, 'manual-pause')
-  assert.match(r.status.reason, /resumes in 30 min/)
-  h.advance(30 * MIN); r = h.tick()
-  assert.deepEqual(r.commands, [{ power: true }], 'after the pause it takes over again')
+  assert.deepEqual(r.commands, [], 'no restore, no command')
+  assert.equal(r.status.state, 'internal')
+  assert.match(r.status.reason, /changed outside the controller/)
+  assert.equal(h.ctl.mode, 'internal')
+  assert.equal(h.ctl.saved, null)
+  assert.equal(h.ctl.takeDirty(), true, 'persisted')
+  assert.deepEqual(h.ctl.persisted(), { mode: 'internal', target: 50, saved: null })
+  h.advance(90 * MIN); r = h.tick()
+  assert.deepEqual(r.commands, [], 'it does not come back by itself')
+  assert.equal(h.unit.power, false)
+  assert.equal(h.unit.mode, 'continuous', 'the unit keeps whatever it has')
+  h.ctl.enable(h.unit)
+  r = h.tick()
+  assert.deepEqual(r.commands, [{ power: true }], 'picking external again resumes it')
 })
 
-test('leaving CO by hand (target changed on the unit) also pauses', () => {
+test('mode or target changed on the unit (leaving CO) also ends external control without commands', () => {
   const h = harness({ minOnMinutes: 0 })
   h.ctl.enable(h.unit, 50)
   h.humidity(60); h.tick()
   h.advance(MIN)
   h.unit.mode = 'auto'; h.unit.targetHumidity = 45
   const r = h.tick()
-  assert.equal(r.status.state, 'manual-pause')
+  assert.equal(r.status.state, 'internal')
   assert.deepEqual(r.commands, [])
+  assert.equal(h.unit.targetHumidity, 45)
+  assert.equal(h.ctl.mode, 'internal')
 })
+
+test('an external change during defrost also ends control; defrost never gets a power-off from the controller', () => {
+  const h = harness({ minOnMinutes: 0 })
+  h.ctl.enable(h.unit, 50)
+  h.humidity(60); h.tick()
+  h.unit.defrost = true
+  h.advance(MIN); h.unit.mode = 'sleep'
+  const r = h.tick()
+  assert.deepEqual(r.commands, [])
+  assert.equal(h.ctl.mode, 'internal')
+})
+
+const ctlMode = (h) => h.ctl.mode
 
 test('the controller\'s own commands do not count as manual changes (grace while the unit catches up)', () => {
   const h = harness({ minOnMinutes: 0, minOffMinutes: 0 })
@@ -236,7 +259,8 @@ test('the controller\'s own commands do not count as manual changes (grace while
   assert.deepEqual(r.commands, [{ mode: 'continuous' }])
   // The unit has not reported CO yet a few seconds later.
   const r2 = h.ctl.tick(h.now + 5000, h.unit, { humidity: { path: 'x', value: 60, at: h.now + 5000 } })
-  assert.notEqual(r2.status.state, 'manual-pause')
+  assert.equal(r2.status.state, 'running')
+  assert.equal(ctlMode(h), 'external')
 })
 
 test('too cold: the unit is not started below the minimum temperature', () => {
@@ -414,22 +438,3 @@ test('persisted state from 0.1.0 without power: the unit\'s current power is kep
   assert.deepEqual(r.tick().commands, [])
 })
 
-test('restart during a manual-change pause: the pause continues, nothing is sent', () => {
-  const h = harness({ minOnMinutes: 0, manualPauseMinutes: 60 })
-  h.ctl.enable(h.unit, 50)
-  h.humidity(60); h.tick()
-  h.advance(MIN); h.tick()
-  h.unit.mode = 'auto'; h.unit.targetHumidity = 50
-  h.advance(MIN)
-  assert.equal(h.tick().status.state, 'manual-pause')
-  assert.equal(h.ctl.takeDirty(), true)
-  const saved = JSON.parse(JSON.stringify(h.ctl.persisted()))
-  assert.equal(saved.pausedUntil, h.now + 60 * MIN)
-  const r = harness({ minOnMinutes: 0 }, saved, { mode: 'auto', targetHumidity: 50, power: true })
-  r.advance(10 * MIN); r.humidity(60)
-  const out = r.tick()
-  assert.deepEqual(out.commands, [])
-  assert.equal(out.status.state, 'manual-pause')
-  r.advance(52 * MIN)
-  assert.deepEqual(r.tick().commands, [{ mode: 'continuous' }], 'takes over when the pause ends')
-})

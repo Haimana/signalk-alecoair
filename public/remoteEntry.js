@@ -218,7 +218,7 @@
     var EXT_DEFAULTS = {
       enabled: false, humidityPath: '', temperaturePath: '', minTemperature: 5,
       hysteresisOn: 3, hysteresisOff: 2, minOnMinutes: 10, minOffMinutes: 10, staleMinutes: 5,
-      onSensorLoss: 'internal', manualPauseMinutes: 60
+      onSensorLoss: 'internal'
     }
 
     function fmtValue(row, kind) {
@@ -235,6 +235,7 @@
       if (!ext.humidityPath && Array.isArray(ext.humidityPaths)) ext.humidityPath = ext.humidityPaths.filter(Boolean)[0] || ''
       delete ext.humidityPaths
       delete ext.combine
+      delete ext.manualPauseMinutes
       var paths = props.paths || {}
       var ctl = props.control || null
       var humId = 'aa-hum-' + d.key
@@ -266,7 +267,6 @@
           h(Field, { label: 'Minimum on time (min)' }, h(TextInput, { type: 'number', value: ext.minOnMinutes, onChange: setNum('minOnMinutes') })),
           h(Field, { label: 'Minimum off time (min)' }, h(TextInput, { type: 'number', value: ext.minOffMinutes, onChange: setNum('minOffMinutes') })),
           h(Field, { label: 'Sensor lost after (min)' }, h(TextInput, { type: 'number', value: ext.staleMinutes, onChange: setNum('staleMinutes') })),
-          h(Field, { label: 'Pause after a manual change (min)' }, h(TextInput, { type: 'number', value: ext.manualPauseMinutes, onChange: setNum('manualPauseMinutes') })),
           h(Field, { label: 'When the sensor is lost', className: 'aa-span2' }, h(Select, {
             value: ext.onSensorLoss, onChange: function (v) { set('onSensorLoss', v) },
             options: [{ value: 'internal', label: 'Back to the unit\u2019s own hygrostat' }, { value: 'off', label: 'Switch the unit off' }]

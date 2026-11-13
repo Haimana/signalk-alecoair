@@ -85,8 +85,9 @@ test('external sensor: one more entry in the working-mode menu; ring and −/+ f
   assert.ok(/\/control`/.test(app), 'the external target goes to the control route, not to the unit')
   assert.ok(/Number\(ctl\.target \|\| 50\) \+ dir \* r\.step/.test(app), '−/+ step the external target by the hygrostat step')
   assert.equal(/EXT_RANGE/.test(app), false, 'no separate 1 % range')
+  assert.equal(/manual-pause/.test(app), false, 'no manual pause any more')
   assert.ok(/sourceHumidity/.test(app), 'ring shows the external humidity')
-  for (const s of ['running', 'idle', 'waiting', 'defrost', 'manual-pause', 'sensor-missing', 'too-cold']) {
+  for (const s of ['running', 'idle', 'waiting', 'defrost', 'sensor-missing', 'too-cold']) {
     assert.ok(app.includes(`${s.includes('-') ? `'${s}'` : s}:`), `status label for ${s}`)
   }
 })

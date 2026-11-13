@@ -42,7 +42,6 @@ const EXT_STATE = {
   idle: 'Idle, below target',
   waiting: 'Waiting (minimum time)',
   defrost: 'Defrost',
-  'manual-pause': 'Paused after a manual change',
   'sensor-missing': 'Sensor missing',
   'too-cold': 'Too cold',
   'tank-full': 'Tank full',

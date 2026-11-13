@@ -232,3 +232,34 @@ test('one sensor path may drive several units', async () => {
   assert.equal(values['environment.inside.dehumidifier.sim.control.sourceHumidity'], 0.62)
   await plugin.stop()
 })
+
+test('a change made on the unit ends external control in the plugin: mode internal persisted, no writes, menu shows the real mode', async () => {
+  const { dataRoot, options } = install({ enabled: true, humidityPath: SENSOR, minOnMinutes: 0, minOffMinutes: 0 })
+  const sensors = { [SENSOR]: fresh(0.62) }
+  const { plugin, router, FakeLan } = boot(dataRoot, sensors)
+  await plugin.start(options)
+  await wait(20)
+  await router.call('POST', '/devices/:key/command', { params: { key: 'd13' }, body: { mode: 'external' } })
+  const before = await router.call('GET', '/devices/:key/state', { params: { key: 'd13' } })
+  assert.equal(before.body.control.mode, 'external')
+  const writes = FakeLan.writes.length
+  // The unit now reports Manual / 45 / on (changed with its buttons), past the grace time.
+  FakeLan.dps = { ...FakeLan.dps, 1: true, 2: 45, 5: 'Manual' }
+  const realNow = Date.now
+  Date.now = () => realNow() + 60000
+  try {
+    // Let the poll read the new DPs, then a control tick run.
+    await new Promise((r) => setTimeout(r, 5600))
+  } finally {
+    Date.now = realNow
+  }
+  const st = await router.call('GET', '/devices/:key/state', { params: { key: 'd13' } })
+  assert.equal(st.body.control.mode, 'internal')
+  assert.equal(st.body.mode, 'auto', 'menu shows the unit\'s real mode')
+  assert.equal(st.body.targetHumidity, 45)
+  assert.equal(FakeLan.writes.length, writes, 'nothing written to the unit')
+  const store = JSON.parse(fs.readFileSync(path.join(dataRoot, 'signalk-alecoair.store.json'), 'utf8'))
+  assert.equal(store.control.d13.mode, 'internal')
+  await plugin.stop()
+  assert.equal(FakeLan.writes.length, writes, 'plugin stop does not restore anything either')
+})

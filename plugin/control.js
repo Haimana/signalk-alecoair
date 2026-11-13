@@ -23,7 +23,9 @@
  *   off then); the controller waits until the defrost ends. A full tank is
  *   left to the firmware.
  * - A change on the unit that the controller did not make (app, buttons,
- *   WebApp, Signal K PUT) pauses the controller for manualPauseMinutes.
+ *   WebApp power/target, Signal K PUT) ends external control at once: the
+ *   mode goes back to internal and the unit is left exactly as it is (no
+ *   restore, no command). Picking the external mode again resumes it.
  * - When the sensor goes stale, the chosen fallback is applied once:
  *   'internal' restores the unit's own hygrostat (previous mode and target,
  *   power on), 'off' switches the unit off.
@@ -43,8 +45,7 @@ const DEFAULTS = {
   minOnMinutes: 10,
   minOffMinutes: 10,
   staleMinutes: 5,
-  onSensorLoss: 'internal',
-  manualPauseMinutes: 60
+  onSensorLoss: 'internal'
 }
 
 function num(v, def, lo, hi) {
@@ -76,8 +77,7 @@ function normalizeControlConfig(raw) {
     minOnMinutes: num(c.minOnMinutes, DEFAULTS.minOnMinutes, 0, 240),
     minOffMinutes: num(c.minOffMinutes, DEFAULTS.minOffMinutes, 0, 240),
     staleMinutes: num(c.staleMinutes, DEFAULTS.staleMinutes, 0.5, 240),
-    onSensorLoss: c.onSensorLoss === 'off' ? 'off' : 'internal',
-    manualPauseMinutes: num(c.manualPauseMinutes, DEFAULTS.manualPauseMinutes, 0, 1440)
+    onSensorLoss: c.onSensorLoss === 'off' ? 'off' : 'internal'
   }
 }
 
@@ -135,8 +135,6 @@ class ExternalController {
     this.resumePower = typeof p.power === 'boolean' ? p.power : null
     this.lastSwitchAt = Number.isFinite(Number(p.lastSwitchAt)) && p.lastSwitchAt !== null ? Number(p.lastSwitchAt) : null
     this.graceUntil = 0
-    // A manual-change pause survives a restart.
-    this.pausedUntil = this.mode === 'external' && Number.isFinite(Number(p.pausedUntil)) ? Number(p.pausedUntil) : 0
     this.retryAt = 0
     this.lossApplied = false
     this.coldLatched = false
@@ -151,7 +149,6 @@ class ExternalController {
     const out = { mode: this.mode, target: this.target, saved: this.saved }
     if (this.mode === 'external' && typeof this.expectedPower === 'boolean') out.power = this.expectedPower
     if (this.mode === 'external' && this.lastSwitchAt !== null) out.lastSwitchAt = this.lastSwitchAt
-    if (this.mode === 'external' && this.pausedUntil > 0) out.pausedUntil = this.pausedUntil
     return out
   }
 
@@ -170,8 +167,7 @@ class ExternalController {
     if (this.mode !== 'external') {
       this.mode = 'external'
       this.inControl = false
-      this.pausedUntil = 0
-      this.lossApplied = false
+        this.lossApplied = false
       this.markDirty()
     }
     if (target !== undefined) this.setTarget(target, unit)
@@ -190,7 +186,6 @@ class ExternalController {
     if (cmd.mode !== 'continuous' && !(unit && unit.controls && unit.controls.targetHumidity)) delete cmd.targetHumidity
     this.mode = 'internal'
     this.inControl = false
-    this.pausedUntil = 0
     this.restorePending = false
     this.saved = null
     this.markDirty()
@@ -203,7 +198,6 @@ class ExternalController {
     if (this.mode === 'internal' && !this.restorePending) return
     this.mode = 'internal'
     this.inControl = false
-    this.pausedUntil = 0
     this.restorePending = true
     this.markDirty()
   }
@@ -252,6 +246,17 @@ class ExternalController {
       this.target = next
       this.markDirty()
     }
+  }
+
+  /** External change on the unit: back to internal, adopt the unit as it is (no restore, no command). */
+  exitExternal() {
+    this.mode = 'internal'
+    this.inControl = false
+    this.restorePending = false
+    this.saved = null
+    this.expectedPower = null
+    this.lastSwitchAt = null
+    this.markDirty()
   }
 
   /** A command the caller sent failed: forget control and retry later. */
@@ -357,20 +362,12 @@ class ExternalController {
     }
     this.lossApplied = false
 
-    if (now < this.pausedUntil) {
-      return done('manual-pause', `The unit was changed by hand. External control resumes in ${fmtMin(this.pausedUntil - now)}.`)
-    }
-
-    // A change the controller did not make pauses it.
+    // A change the controller did not make ends external control; the unit is left as it is.
     if (this.inControl && now >= this.graceUntil) {
       const powerChanged = this.expectedPower !== null && Boolean(u.power) !== this.expectedPower
       if (powerChanged || !this.inControlMode(u)) {
-        this.inControl = false
-        this.pausedUntil = now + cfg.manualPauseMinutes * MIN
-        this.markDirty()
-        if (cfg.manualPauseMinutes > 0) {
-          return done('manual-pause', `The unit was changed by hand. External control resumes in ${fmtMin(cfg.manualPauseMinutes * MIN)}.`)
-        }
+        this.exitExternal()
+        return done('internal', 'The unit was changed outside the controller, so external control was switched off. Pick the external mode again to resume.')
       }
     }
 
@@ -457,8 +454,7 @@ class ExternalController {
       sourceHumidity: this.last.humidity,
       sourceTemperature: this.config.temperaturePath ? this.last.temperature : null,
       hysteresisOn: this.config.hysteresisOn,
-      hysteresisOff: this.config.hysteresisOff,
-      pausedUntil: this.pausedUntil > 0 ? this.pausedUntil : null
+      hysteresisOff: this.config.hysteresisOff
     }
   }
 }

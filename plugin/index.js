@@ -997,8 +997,7 @@ module.exports = function factory(app, injected = {}) {
                   minOnMinutes: { type: 'number', title: 'Minimum on time (min)', default: 10 },
                   minOffMinutes: { type: 'number', title: 'Minimum off time (min)', default: 10 },
                   staleMinutes: { type: 'number', title: 'Sensor counts as lost after (min)', default: 5 },
-                  onSensorLoss: { type: 'string', title: 'When the sensor is lost', enum: ['internal', 'off'], default: 'internal' },
-                  manualPauseMinutes: { type: 'number', title: 'Pause after a manual change (min)', default: 60 }
+                  onSensorLoss: { type: 'string', title: 'When the sensor is lost', enum: ['internal', 'off'], default: 'internal' }
                 }
               }
             }
