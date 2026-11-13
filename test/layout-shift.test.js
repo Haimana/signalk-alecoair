@@ -211,7 +211,24 @@ const BALANCE = `(() => {
       statRight: Math.round(pr.right - Math.max(...st.map((x) => x.right))),
       statBelow: Math.round(Math.min(...st.map((x) => x.top)) - Math.max(...ms.map((x) => x.bottom), p.querySelector('.fan').hidden ? 0 : b('.fan').bottom)),
       statVsModes: Math.round((Math.min(...st.map((x) => x.left)) + Math.max(...st.map((x) => x.right))) / 2 - (Math.min(...ms.map((x) => x.left)) + Math.max(...ms.map((x) => x.right))) / 2),
-      msgBelowStat: Math.round(m.top - Math.max(...st.map((x) => x.bottom)))
+      msgBelowStat: Math.round(m.top - Math.max(...st.map((x) => x.bottom))),
+      statTextVsGauge: (() => {
+        // bottom of the last status line's text vs the bottom of the gauge's 30 / 80 labels
+        const last = [...p.querySelectorAll('.stat')].filter((e) => !e.closest('[hidden]')).pop()
+        const rg = document.createRange(); rg.selectNodeContents(last.firstChild)
+        const rg2 = document.createRange(); rg2.selectNodeContents(p.querySelector('.end').firstChild)
+        return Math.round(rg.getBoundingClientRect().bottom - rg2.getBoundingClientRect().bottom)
+      })(),
+      modesCentred: (() => {
+        const fan = p.querySelector('.fan')
+        const grp = ms.concat(fan.hidden ? [] : [fan.getBoundingClientRect()])
+        const side = b('.side'), pad = parseFloat(getComputedStyle(p.querySelector('.side')).paddingTop)
+        const gap = parseFloat(getComputedStyle(p.querySelector('.side')).rowGap) || 0
+        const above = Math.min(...grp.map((x) => x.top)) - (side.top + pad)
+        const below = Math.min(...st.map((x) => x.top)) - gap - Math.max(...grp.map((x) => x.bottom))
+        return Math.round(above - below)
+      })(),
+      cardH: Math.round(pr.height)
     }
   }
   return JSON.stringify(out)
@@ -236,6 +253,7 @@ test('desktop: gauge at the same x on every card, modes centred in the rest, sta
       await s('Page.navigate', { url: `http://127.0.0.1:${port}/signalk-alecoair/` })
       for (let i = 0; i < 100 && !(await evaluate("document.querySelectorAll('.panel[data-key] .mode').length === 9 && document.querySelector('#device-d16 .msg.show') !== null")); i++) await sleep(100)
       const got = JSON.parse(await evaluate(BALANCE))
+      assert.equal(new Set(Object.values(got).map((g) => g.cardH)).size, 1, `same card height on every unit (${width} px: ${JSON.stringify(got)})`)
       const xs = new Set(Object.values(got).map((g) => g.gaugeX))
       assert.equal(xs.size, 1, `gauge at the same x on every card whatever the mode count (${width} px: ${JSON.stringify(got)})`)
       if (width >= 1280) assert.equal([...xs][0], 100, 'gauge 100 px from the card edge on wide screens')
@@ -250,6 +268,9 @@ test('desktop: gauge at the same x on every card, modes centred in the rest, sta
         assert.ok(Math.abs(g.statVsModes) <= 2, `status labels centred under the modes (${at})`)
         assert.ok(g.statBelow >= 0, `status labels below the modes and fan (${at})`)
         assert.ok(g.msgBelowStat >= 0, `message slot below the status labels (${at})`)
+        assert.ok(Math.abs(g.statTextVsGauge) <= 1, `status text bottom level with the gauge's 30 / 80 labels (${at})`)
+        assert.ok(Math.abs(g.modesCentred) <= 2, `modes (and fan) centred in the space above the status labels (${at})`)
+        assert.ok(g.msgInside, `message inside the card (${at})`)
       }
     }
   } finally {

@@ -289,11 +289,15 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 14px;
-  padding: 8px 0;
+  padding: 8px 0 14px; /* desktop: the status text sits on the same line as the gauge's 30 / 80 */
   position: relative;
 }
+/* Desktop: status labels at the bottom of the column, level with the bottom of
+   the gauge; modes (and fan) centred in the space above them. */
+.side > .modes { margin-top: auto; }
+.side > .status { margin-top: auto; }
 
 /* ——— Message slot: never moves the layout ———
    Card: a slot that is always reserved under the status labels, in the modes
@@ -313,8 +317,11 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
 .msg.show { opacity: 1; pointer-events: auto; }
 .msg.alert { color: var(--red); }
 .side > .msg {
-  width: 100%;
-  height: calc(1.4em); /* always reserved: one line under the status labels */
+  position: absolute; /* desktop: one line just under the column, in the card padding */
+  left: 0;
+  right: 0;
+  top: calc(100% + 2px);
+  height: calc(1.4em);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -458,7 +465,9 @@ button.stat:not(:disabled):not(.lit):hover { color: var(--hover); }
   .side { flex: 1 1 auto; }
   .side > .fan { width: 100%; min-width: 0; }
   /* Phone: a fixed 2-line slot under the modes, always reserved. */
+  .side > .modes, .side > .status { margin-top: 0; }
   .side > .msg {
+    position: static;
     width: 100%;
     height: calc(2 * 1.4em);
     white-space: normal;
