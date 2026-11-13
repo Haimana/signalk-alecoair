@@ -152,10 +152,13 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   flex: 1 1 auto;
   display: flex;
   align-items: center;
-  gap: 56px;
+  gap: 0;
   min-height: 0;
-  padding: 0 0 4px 44px; /* with the panel padding: ~76 px before the gauge */
+  padding: 0 0 4px 68px; /* with the 32 px panel padding: 100 px before the gauge */
 }
+/* Desktop spacing: gauge → −/+ 64 px, −/+ → modes column 24 px (modes centred in a 460 px column). */
+.dial { margin-right: 64px; }
+.steppers { margin-right: 24px; }
 .msg { text-align: center; }
 
 .dial { position: relative; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
@@ -275,7 +278,7 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
 .step:not(:disabled):hover { color: #fff; filter: var(--glow); }
 
 .side {
-  flex: 1 1 auto;
+  flex: 0 1 460px;
   min-width: 0;
   align-self: stretch;
   display: flex;
@@ -389,7 +392,9 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   .panel { width: 100%; min-height: 0; border-radius: 24px; padding: 18px 18px 20px; }
   .name { font-size: 11px; letter-spacing: 0.2em; }
   .panel-main { flex-direction: column; align-items: stretch; gap: 10px; padding: 4px 0 0; }
-  .steppers { flex-direction: row; gap: 24px; }
+  .steppers { flex-direction: row; gap: 24px; margin-right: 0; }
+  .dial { margin-right: 0; }
+  .side { flex: 1 1 auto; }
   .step-plus { order: 0; }
   .dial { justify-content: center; }
   .ring { width: min(244px, calc(100vw - 150px)); height: min(244px, calc(100vw - 150px)); }

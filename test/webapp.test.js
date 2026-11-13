@@ -97,3 +97,11 @@ test('gauge: thin background arc and a thicker current-humidity arc (no dots); -
   const dim = css.match(/--dim: rgba\(255, 255, 255, (0\.\d+)\)/)
   assert.ok(dim && Number(dim[1]) >= 0.35, 'unlit elements are clearly visible')
 })
+
+test('desktop spacing: 100 px before the gauge, -/+ close to the modes column; phone resets it', () => {
+  const pad = css.match(/\.panel \{[^}]*padding: \d+px (\d+)px/)
+  const main = css.match(/\.panel-main \{[^}]*padding: 0 0 4px (\d+)px/)
+  assert.ok(pad && main && Number(pad[1]) + Number(main[1]) === 100, 'gauge starts 100 px from the card edge')
+  assert.ok(/\.steppers \{ margin-right: 24px; \}/.test(css) && /\.side \{\s*flex: 0 1 460px/.test(css), '-/+ close to a bounded modes column')
+  assert.ok(/@media \(max-width: 760px\)[\s\S]*\.dial \{ margin-right: 0; \}/.test(css), 'phone layout unchanged')
+})
