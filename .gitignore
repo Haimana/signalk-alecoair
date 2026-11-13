@@ -7,3 +7,4 @@ coverage/
 .signalk-demo/
 agent-tools/
 .hide-profiles
+*.tgz
