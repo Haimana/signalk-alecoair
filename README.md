@@ -22,8 +22,6 @@ The WebApp is for day-to-day control. All setup is in Signal K Admin.
 
 ![AlecoAir WebApp on a desktop](./docs/screenshots/webapp.png)
 
-<img src="./docs/screenshots/webapp-phone.png" alt="AlecoAir WebApp on a phone" width="320">
-
 ![Plugin setup in Signal K Admin](./docs/screenshots/admin-setup.png)
 
 ![External control and WebApp options of a unit in Signal K Admin](./docs/screenshots/admin-external.png)
