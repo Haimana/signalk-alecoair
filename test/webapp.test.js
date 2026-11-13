@@ -87,3 +87,13 @@ test('left: dotted arc with -/+ beside it and the values in its centre; right: m
   const dim = css.match(/--dim: rgba\(255, 255, 255, (0\.\d+)\)/)
   assert.ok(dim && Number(dim[1]) >= 0.35, 'unlit elements are clearly visible')
 })
+
+test('-/+ are bare glyphs at the two ends of the arc; a solid sector shows the current humidity over the dotted gauge', () => {
+  assert.ok(/<symbol id="i-minus" viewBox="0 0 24 24"><path [^>]*\/><\/symbol>/.test(html), 'minus has no circle outline')
+  assert.ok(/<symbol id="i-plus" viewBox="0 0 24 24"><path [^>]*\/><\/symbol>/.test(html), 'plus has no circle outline')
+  assert.ok(/step-min/.test(tpl) && /step-max/.test(tpl) && /\.step-min \{/.test(css) && /\.step-max \{/.test(css), 'placed at the min and max ends')
+  assert.ok(/\.step \{[^}]*width: 48px; height: 48px/.test(css), '48 px hit area kept')
+  assert.ok(/data-r="dots"[\s\S]*data-r="arcFill"[\s\S]*data-r="knob"/.test(tpl), 'dots, then the solid sector, then the knob on top')
+  assert.ok(/arcFill\.setAttribute\('stroke-dasharray'/.test(app))
+  assert.ok(/\.side \{[^}]*align-items: center/.test(css) && /\.modes \{[^}]*justify-content: center/.test(css) && /\.status \{[^}]*justify-content: center/.test(css), 'modes and status centred in the right column')
+})

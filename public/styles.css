@@ -154,10 +154,11 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   align-items: center;
   gap: 40px;
   min-height: 0;
-  padding: 0 0 4px;
+  padding: 0 0 4px 36px; /* room before the gauge */
 }
+.msg { text-align: center; }
 
-.dial { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
+.dial { position: relative; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
 .ring {
   position: relative;
   width: 236px;
@@ -174,6 +175,17 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
 .ring .dot.major { fill: rgba(255,255,255,0.38); }
 .ring .dot.lit { fill: rgba(255,255,255,0.96); filter: drop-shadow(0 0 2.5px rgba(255,255,255,0.7)); }
 .ring .dot.under { visibility: hidden; }
+.ring .arc-fill {
+  fill: none;
+  stroke: rgba(255,255,255,0.88);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 3px rgba(255,255,255,0.55));
+  pointer-events: none;
+  transition: stroke-dasharray 0.4s ease;
+}
+.panel.is-off .ring .arc-fill { stroke: rgba(255,255,255,0.55); filter: none; }
+.panel.is-offline .ring .arc-fill { stroke: var(--dim); filter: none; }
 .ring .knob {
   fill: #0b0c10;
   stroke: rgba(243,244,246,1);
@@ -224,26 +236,31 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
 }
 .end {
   position: absolute;
-  bottom: 18px;
+  top: 72%;
   font-size: 10px;
   letter-spacing: 0.08em;
   color: rgba(255,255,255,0.42);
   font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
-.end-min { left: 40px; }
-.end-max { right: 40px; }
+.end-min { left: 27%; transform: translateX(-50%); }
+.end-max { right: 27%; transform: translateX(50%); }
 
 .step {
-  width: 48px; height: 48px; flex: 0 0 48px;
+  /* No outline: only the glyph, at the two ends of the arc; invisible 48 px hit area. */
+  position: absolute;
+  top: 77%;
+  width: 48px; height: 48px;
   display: grid; place-items: center;
-  color: rgba(255,255,255,0.7);
+  color: rgba(255,255,255,0.82);
   border-radius: 50%;
-  margin-top: 96px; /* beside the lower part of the arc, like the old dial */
+  z-index: 2;
 }
+.step-min { left: 19.5%; transform: translate(-50%, 0); }
+.step-max { left: 80.5%; transform: translate(-50%, 0); }
 .step:disabled { color: var(--dim); }
-.step svg { width: 36px; height: 36px; stroke: currentColor; fill: none; stroke-width: 1.2; stroke-linecap: round; }
-.step:not(:disabled):hover { color: var(--lit); filter: var(--glow); }
+.step svg { width: 28px; height: 28px; stroke: currentColor; fill: none; stroke-width: 1.4; stroke-linecap: round; }
+.step:not(:disabled):hover { color: #fff; filter: var(--glow); }
 
 .side {
   flex: 1 1 auto;
@@ -251,6 +268,7 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   align-self: stretch;
   display: flex;
   flex-direction: column;
+  align-items: center;
   justify-content: center;
   gap: 22px;
   padding: 8px 0;
@@ -272,7 +290,7 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
 .page-msg { width: 1120px; max-width: 100%; text-align: center; }
 
 /* ——— Modes (top right) and status (below) ——— */
-.modes { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 4px; min-width: 0; }
+.modes { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 6px 4px; min-width: 0; }
 .mode, .fan-btn, .stat {
   display: flex;
   flex-direction: column;
@@ -305,12 +323,12 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
 .mode.lit, .fan-btn.lit { color: #fff; filter: var(--glow-strong); }
 .mode.lit .lbl, .fan-btn.lit .lbl { color: rgba(255,255,255,0.95); }
 
-.extras { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 2px; }
+.extras { display: flex; align-items: flex-start; justify-content: center; flex-wrap: wrap; gap: 2px; }
 .fan { display: flex; align-items: flex-start; margin-right: 10px; padding-right: 10px; border-right: 1px solid rgba(255,255,255,0.12); }
 .fan-btn { min-width: 48px; padding: 4px 6px 0; }
 .fan-btn svg { fill: currentColor; stroke-width: 0; }
 
-.status { display: flex; align-items: flex-start; flex-wrap: wrap; }
+.status { display: flex; align-items: flex-start; justify-content: center; flex-wrap: wrap; }
 .stat { min-width: 50px; padding: 4px 4px 0; }
 .stat .meta { letter-spacing: 0.08em; text-transform: none; color: transparent; min-height: 9px; font-variant-numeric: tabular-nums; }
 .stat.lit { color: #fff; filter: var(--glow); }
@@ -360,6 +378,7 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
   .panel { width: 100%; min-height: 0; border-radius: 24px; padding: 18px 18px 20px; }
   .name { font-size: 11px; letter-spacing: 0.2em; }
   .panel-main { flex-direction: column; align-items: stretch; gap: 10px; padding: 4px 0 0; }
+  .ring { margin-bottom: 18px; } /* −/+ sit just below the arc ends */
   .dial { justify-content: center; }
   .ring { width: min(244px, calc(100vw - 150px)); height: min(244px, calc(100vw - 150px)); }
   .side { align-items: center; gap: 16px; padding: 0; }

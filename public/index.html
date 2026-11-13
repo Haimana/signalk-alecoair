@@ -41,8 +41,8 @@
     <symbol id="i-tank" viewBox="0 0 24 24"><path d="M7 7.5h10v9.2a3.3 3.3 0 0 1-3.3 3.3h-3.4A3.3 3.3 0 0 1 7 16.7V7.5z"/><path d="M6.2 7.5h11.6"/><path class="tank-water" style="fill: var(--tank-fill, none); stroke: none" d="M8.3 13.2h7.4V16.4A2 2 0 0 1 13.8 18.3h-3.6a2 2 0 0 1-1.9-1.9v-3.2z"/></symbol>
     <symbol id="i-lock" viewBox="0 0 24 24"><rect x="6.5" y="10.5" width="11" height="9" rx="1.6"/><path d="M8.7 10.5V8.2a3.3 3.3 0 0 1 6.6 0v2.3"/></symbol>
     <symbol id="i-timer" viewBox="0 0 24 24"><circle cx="12" cy="13" r="7.2"/><path d="M12 13V8.8M12 13l3.1 2"/><path d="M10 4.3h4"/></symbol>
-    <symbol id="i-minus" viewBox="0 0 36 36"><circle cx="18" cy="18" r="15.2"/><path d="M12 18h12"/></symbol>
-    <symbol id="i-plus" viewBox="0 0 36 36"><circle cx="18" cy="18" r="15.2"/><path d="M12 18h12M18 12v12"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
     <symbol id="i-fan-low" viewBox="0 0 24 24"><rect x="6.5" y="12" width="3.2" height="7" rx="1.2"/><rect x="12.2" y="8" width="3.2" height="11" rx="1.2"/></symbol>
     <symbol id="i-fan-high" viewBox="0 0 24 24"><rect x="4.2" y="13.5" width="3.1" height="5.5" rx="1.2"/><rect x="9.55" y="10" width="3.1" height="9" rx="1.2"/><rect x="14.9" y="6.5" width="3.1" height="12.5" rx="1.2"/></symbol>
   </svg>
@@ -62,10 +62,11 @@
 
         <div class="panel-main">
           <div class="dial">
-            <button type="button" class="step" data-r="minus" aria-label="Lower target humidity"><svg aria-hidden="true"><use href="#i-minus"></use></svg></button>
+            <button type="button" class="step step-min" data-r="minus" aria-label="Lower target humidity"><svg aria-hidden="true"><use href="#i-minus"></use></svg></button>
             <div class="ring" data-r="track" role="slider" tabindex="0" aria-label="Target humidity" aria-valuemin="30" aria-valuemax="80" aria-valuenow="50">
               <svg viewBox="0 0 200 200" aria-hidden="true" focusable="false">
                 <g data-r="dots"></g>
+                <circle class="arc-fill" data-r="arcFill" cx="100" cy="100" r="86" transform="rotate(135 100 100)"/>
                 <circle class="knob" data-r="knob" cx="100" cy="14" r="7.5"/>
               </svg>
               <div class="readout">
@@ -75,7 +76,7 @@
               <span class="end end-min" data-r="rangeMin" aria-hidden="true">30</span>
               <span class="end end-max" data-r="rangeMax" aria-hidden="true">80</span>
             </div>
-            <button type="button" class="step" data-r="plus" aria-label="Raise target humidity"><svg aria-hidden="true"><use href="#i-plus"></use></svg></button>
+            <button type="button" class="step step-max" data-r="plus" aria-label="Raise target humidity"><svg aria-hidden="true"><use href="#i-plus"></use></svg></button>
           </div>
 
           <div class="side">

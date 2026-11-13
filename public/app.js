@@ -6,8 +6,8 @@
  * Signal K Admin → Plugin Config → AlecoAir.
  *
  * Dead-front glass panel per unit, stacked: name, LAN dot and power on top;
- * on the left a dotted 270° arc (lit dots = current humidity, knob = target)
- * with −/+ beside it and the values in its centre (big target or CO, current
+ * on the left a dotted 270° arc (lit dots and a solid sector = current
+ * humidity, knob = target) with − and + at its two ends and the values in its centre (big target or CO, current
  * humidity small with a droplet or the external antenna); on the right the
  * working-mode icon buttons and under them the status icons (compressor,
  * defrost, tank full in red, child lock, timer, external sensor, fan).
@@ -478,6 +478,11 @@ class DeviceView {
     this.buildDots(r)
     const frac = (v) => clamp((v - r.min) / (r.max - r.min), 0, 1)
     const showKnob = canTarget && !continuous
+    // Solid sector from the range start to the current humidity, over the dotted gauge.
+    const arcLen = 2 * Math.PI * ARC.r
+    const fill = hasRh ? frac(rh) * arcLen * ARC.sweep / 360 : 0
+    e.arcFill.setAttribute('stroke-dasharray', `${fill.toFixed(2)} ${arcLen.toFixed(2)}`)
+    e.arcFill.setAttribute('visibility', fill > 0 ? 'visible' : 'hidden')
     const kp = arcPoint(frac(target))
     e.knob.setAttribute('cx', kp.x.toFixed(2))
     e.knob.setAttribute('cy', kp.y.toFixed(2))
