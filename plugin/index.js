@@ -746,6 +746,13 @@ module.exports = function factory(app, injected = {}) {
       const how = persisted.stop ? `unit ${persisted.stop.handedBack ? 'was given its hygrostat back' : 'was kept as it was'} at the last stop (${persisted.stop.reason})` : 'no stop recorded (crash or power loss?)'
       info(`${entry.cfg.key}: resuming External after start; ${how}; CO${typeof persisted.power === 'boolean' ? ` and power ${persisted.power ? 'on' : 'off'}` : ''} are sent again`)
     }
+    // The stop record describes the last stop only: drop it now, so a crash
+    // before the next stop is reported as "no stop recorded".
+    if (persisted && persisted.stop) {
+      const { stop: _stop, ...rest } = persisted
+      store.control = { ...(store.control || {}), [entry.cfg.key]: rest }
+      persistStore()
+    }
     if (ext.enabled) {
       publishControlMeta(entry)
       registerControlPuts(entry)

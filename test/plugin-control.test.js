@@ -415,6 +415,8 @@ test('restart without hand-back: the next start resumes External with CO and the
     assert.deepEqual(second.FakeLan.writes.slice(0, 2), [{ 2: 25, 5: 'Manual' }, { 1: true }])
     assert.ok(!second.FakeLan.writes.some((w) => w[2] === 50), 'never the hygrostat')
     assert.ok(second.app.logs.some((m) => /was kept as it was at the last stop \(restart\)/.test(m)))
+    const stored = JSON.parse(fs.readFileSync(path.join(t.dataRoot, 'signalk-alecoair.store.json'), 'utf8')).control.d13
+    assert.equal(stored.stop, undefined, 'stop record dropped at start: a crash before the next stop shows as no stop recorded')
   } finally {
     await second.plugin.stop()
   }
