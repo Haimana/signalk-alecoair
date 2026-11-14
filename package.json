@@ -15,7 +15,7 @@
   "signalk-plugin-enabled-by-default": false,
   "signalk": {
     "displayName": "AlecoAir",
-    "appIcon": "./public/icon.svg",
+    "appIcon": "./icon.svg",
     "screenshots": [
       "./docs/screenshots/webapp.png",
       "./docs/screenshots/admin-setup.png",
@@ -39,7 +39,8 @@
     "openapi.json",
     "docs",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "icon.svg"
   ],
   "repository": {
     "type": "git",

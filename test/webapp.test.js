@@ -145,3 +145,11 @@ test('external temperature: small, top-right corner of the gauge box, absolute, 
   assert.ok(/next\.sensorTemperature/.test(app) && /toFixed\(1\)\} °C/.test(app), 'value from the device state, one decimal °C')
   assert.ok(/show\(e\.extTemp, Boolean\(tText\)\)/.test(app), 'shown only with a value, in every mode')
 })
+
+test('App Store icon: appIcon is ./icon.svg (resolved against public/), with a copy at the package root', () => {
+  const root = path.join(__dirname, '..')
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
+  assert.equal(pkg.signalk.appIcon, './icon.svg')
+  assert.ok(pkg.files.includes('icon.svg') && pkg.files.includes('public'), 'both copies are published')
+  assert.equal(fs.readFileSync(path.join(root, 'icon.svg'), 'utf8'), fs.readFileSync(path.join(pub, 'icon.svg'), 'utf8'), 'the two copies are the same')
+})
