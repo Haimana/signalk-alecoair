@@ -4,8 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## 0.0.5 (2026-11-14)
 
-- WebApp: the external temperature sensor (Admin → External control → Temperature path) is shown small in the top-right corner of the gauge, with a thermometer glyph and °C to one decimal (Signal K Kelvin converted). It shows in every mode, not only while External runs, and is hidden when there is no path or the value is missing or older than the sensor-lost time. It is positioned absolutely, so it moves nothing; it stays clear of the arc, the −/+ and the card header on desktop and phone.
-- Plugin: the device state (`GET /devices/<key>/state`) has `sensorTemperature: { path, value (°C), at }` or `null`, read from Signal K on every request, so it is there whether or not external control is running.
+- WebApp: the external temperature sensor (Admin → External control → Temperature path) is shown in the centre of the gauge, as a line under the current humidity with a thermometer glyph, about the same size, one decimal. It shows in every mode, not only while External runs, and is hidden when there is no path or the value is missing or older than the sensor-lost time. It hangs absolutely under the humidity line, so the big target and the layout do not move.
+- Temperature unit from Signal K: the plugin converts with the server's unit preferences for that path (`app.getDisplayUnits` / `app.convertToDisplayUnits`, Signal K 2.x, i.e. the active preset: °C, °F or K); °C when the server has none.
+- Plugin: the device state (`GET /devices/<key>/state`) has `sensorTemperature: { path, value, unit, unitSource ('signalk' | 'default'), celsius, at }` or `null`, read from Signal K on every request, so it is there whether or not external control is running.
+- WebApp: a click or tap on the gauge no longer shows a focus ring around it or selects text; only a press on the arc moves the target (a press in the centre still does nothing). The focus ring stays for keyboard use.
 - App Store / Admin Webapps icon: `signalk.appIcon` is now `./icon.svg`. Admin resolves it against the WebApp root (`public/`), so `./public/icon.svg` gave a 404. `icon.svg` is also published at the package root for the App Store's icon lookup.
 
 ## 0.0.4 (2026-11-13)

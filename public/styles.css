@@ -178,6 +178,10 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
 }
 .ring[aria-disabled="true"] { cursor: default; }
 .ring:focus-visible { outline-offset: -6px; }
+.ring, .ring * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+/* A click or tap on the gauge never shows the focus ring (some browsers treat the
+   focus that follows a pointer press as "visible"); the keyboard still gets it. */
+.ring:focus:not(:focus-visible), .ring[data-pointer]:focus, .ring[data-pointer]:focus-visible { outline: none; }
 .ring > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .ring .arc-bg {
   fill: none;
@@ -256,23 +260,26 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
 }
 .end-min { left: 19.5%; transform: translateX(-50%); }
 .end-max { left: 80.5%; transform: translateX(-50%); }
-/* External temperature: small, in the gauge box's top-right corner, outside the
-   arc (the arc never reaches that corner). Absolute, so it never moves anything. */
+/* External temperature: a line under the current humidity, same size, in the
+   gauge centre. Absolute (hung under .current), so the big target and the
+   current humidity stay exactly where they are with or without it. */
+.current { position: relative; }
 .ext-temp {
   position: absolute;
-  top: 4px;
-  right: -14px;
+  top: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 3px;
-  font-size: 11px;
+  gap: 5px;
+  font-size: 14px;
   letter-spacing: 0.04em;
   color: var(--mid);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   pointer-events: none;
 }
-.ext-temp svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+.ext-temp svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 
 /* Desktop: − / + stacked (+ on top) in their own column, centred on the gauge. */
 .steppers {

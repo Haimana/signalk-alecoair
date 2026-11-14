@@ -14,7 +14,7 @@
       "get": {
         "summary": "State, controls and capabilities of one device",
         "parameters": [{ "name": "key", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "Device state. sensorTemperature: { path, value (°C, one decimal), at } from the External control temperature path while the value is fresh, else null" }, "404": { "description": "Unknown device" } }
+        "responses": { "200": { "description": "Device state. sensorTemperature: { path, value (one decimal, in the Signal K display unit), unit, unitSource (signalk | default), celsius, at } from the External control temperature path while the value is fresh, else null" }, "404": { "description": "Unknown device" } }
       }
     },
     "/devices/{key}/command": {

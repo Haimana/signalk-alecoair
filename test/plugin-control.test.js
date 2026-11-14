@@ -276,6 +276,8 @@ test('device state carries the external temperature in every mode while it is fr
   assert.equal(st.control.mode, 'internal', 'external control is not running')
   assert.equal(st.sensorTemperature.value, 18.4, 'Kelvin -> °C, one decimal')
   assert.equal(st.sensorTemperature.path, TEMP)
+  assert.equal(st.sensorTemperature.unit, '°C', 'no Signal K unit preferences: °C')
+  assert.equal(st.sensorTemperature.unitSource, 'default')
   sensors[TEMP] = { value: 291.55, $source: 'x', timestamp: new Date(Date.now() - 6 * 60 * 1000).toISOString() }
   st = await state()
   assert.equal(st.sensorTemperature, null, 'stale (older than the sensor-lost time): hidden')
@@ -296,4 +298,32 @@ test('no external temperature without a temperature path or with external contro
     assert.equal(st.sensorTemperature, null, JSON.stringify(ext))
     await plugin.stop()
   }
+})
+
+test('external temperature follows Signal K unit preferences (getDisplayUnits / convertToDisplayUnits); °C fallback', async () => {
+  const TEMP = 'environment.inside.mainCabin.temperature'
+  const { dataRoot, options } = install({ enabled: true, humidityPath: SENSOR, temperaturePath: TEMP })
+  const sensors = { [SENSOR]: fresh(0.55), [TEMP]: fresh(291.15) }
+  const { app, plugin, router } = boot(dataRoot, sensors)
+  await plugin.start(options)
+  await wait(20)
+  const state = async () => (await router.call('GET', '/devices/:key/state', { params: { key: 'd13' } })).body.sensorTemperature
+  const asked = []
+  app.getDisplayUnits = (p) => { asked.push(p); return { category: 'temperature', targetUnit: 'F', formula: '(value - 273.15) * 9 / 5 + 32', symbol: '°F', displayFormat: '0.0' } }
+  app.convertToDisplayUnits = (p, v) => ({ value: (v - 273.15) * 9 / 5 + 32, symbol: '°F', displayFormat: '0.0' })
+  let t = await state()
+  assert.deepEqual([t.value, t.unit, t.unitSource, t.celsius], [64.4, '°F', 'signalk', 18])
+  assert.equal(asked[0], TEMP, 'asks for the configured path')
+  delete app.convertToDisplayUnits
+  app.getDisplayUnits = () => ({ category: 'temperature', targetUnit: 'K', symbol: 'K' })
+  t = await state()
+  assert.ok(Math.abs(t.value - 291.15) <= 0.051 && t.unit === 'K' && t.unitSource === 'signalk', `unit name only: converted by the plugin (${JSON.stringify(t)})`)
+  app.getDisplayUnits = () => { throw new Error('no preferences') }
+  t = await state()
+  assert.deepEqual([t.value, t.unit, t.unitSource], [18, '°C', 'default'])
+  sensors[TEMP] = fresh(18.4)
+  delete app.getDisplayUnits
+  t = await state()
+  assert.deepEqual([t.value, t.unit], [18.4, '°C'], 'a sensor that publishes °C is accepted too')
+  await plugin.stop()
 })

@@ -40,7 +40,7 @@ function units() {
       controls: { power: true, mode: true, targetHumidity: true, fan: true, childLock: true, timer: true },
       modes: [{ value: 'auto', label: 'Normal' }, { value: 'laundry', label: 'Laundry' }, { value: 'purify', label: 'Purify' }, { value: 'sleep', label: 'Sleep' }, { value: 'external', label: 'Auto / external sensor' }],
       control: { configured: true, available: true, mode: 'external', target: 50, state: 'running', reason: '', sourceHumidity: 62 },
-      sensorTemperature: { path: 'environment.inside.mainCabin.temperature', value: -12.4 }
+      sensorTemperature: { path: 'environment.inside.mainCabin.temperature', value: -12.4, unit: '°F' }
     }
   }
 }
@@ -282,29 +282,34 @@ test('desktop: gauge at the same x on every card, modes centred in the rest, sta
 
 const TEMP = `(() => {
   const out = {}
+  const r = (el) => { const b = el.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)] }
   for (const p of document.querySelectorAll('.panel[data-key]')) {
     const t = p.querySelector('.ext-temp')
-    if (t.hidden) { out[p.dataset.key] = { shown: false }; continue }
+    const fixed = { target: r(p.querySelector('.target')), current: r(p.querySelector('.current')), ring: r(p.querySelector('.ring')), ends: r(p.querySelector('.end-max')) }
+    if (t.hidden) { out[p.dataset.key] = { shown: false, fixed }; continue }
     const b = (el) => el.getBoundingClientRect()
-    const tb = b(t), pr = b(p), rg = b(p.querySelector('.ring')), plus = b(p.querySelector('.step-plus'))
-    const pad = parseFloat(getComputedStyle(p).paddingRight)
+    const tb = b(t), cur = b(p.querySelector('.current')), rg = b(p.querySelector('.ring'))
+    const ends = [...p.querySelectorAll('.end')].map(b)
     const cx = rg.left + rg.width / 2, cy = rg.top + rg.height / 2
-    const nx = Math.max(tb.left, Math.min(cx, tb.right)), ny = Math.max(tb.top, Math.min(cy, tb.bottom))
     const sw = parseFloat(getComputedStyle(p.querySelector('.arc-fill')).strokeWidth) || 4
+    const inner = (rg.width / 2) * 86 / 100 - sw * rg.width / 400
+    const far = Math.max(...[[tb.left, tb.top], [tb.right, tb.top], [tb.left, tb.bottom], [tb.right, tb.bottom]].map(([x, y]) => Math.hypot(x - cx, y - cy)))
     out[p.dataset.key] = {
       shown: true,
+      fixed,
       text: t.textContent.trim(),
-      oneLine: tb.height < 20,
-      insideCard: tb.left >= pr.left + 8 && tb.right <= pr.right - pad + 1,
-      clearOfHeader: [...p.querySelector('header').querySelectorAll('*')].filter((el) => el.getClientRects().length).every((el) => { const r = b(el); return r.right <= tb.left || r.left >= tb.right || r.bottom <= tb.top || r.top >= tb.bottom }),
-      clearOfArc: Math.round(Math.hypot(nx - cx, ny - cy) - (rg.width / 2) * 86 / 100 - sw * rg.width / 400),
-      gapToPlus: Math.round(plus.left - tb.right),
-      plusRightOfRing: plus.left > rg.right
+      oneLine: tb.height < 22,
+      belowCurrent: Math.round(tb.top - cur.bottom),
+      centred: Math.round((tb.left + tb.right) / 2 - cx),
+      insideArc: Math.round(inner - far),
+      clearOfEnds: ends.every((e) => e.right <= tb.left || e.left >= tb.right || e.bottom <= tb.top || e.top >= tb.bottom),
+      fontPx: parseFloat(getComputedStyle(t).fontSize),
+      currentPx: parseFloat(getComputedStyle(p.querySelector('.current')).fontSize)
     }
   }
   return JSON.stringify(out)
 })()`
-test('external temperature: top-right of the gauge, clear of the arc, the -/+ and the header (desktop and phone)', { skip: !CHROME && 'no Chrome/Chromium found', timeout: 90000 }, async () => {
+test('external temperature: under the current humidity in the gauge centre; moves nothing; a click there shows no focus ring (desktop and phone)', { skip: !CHROME && 'no Chrome/Chromium found', timeout: 90000 }, async () => {
   const { st, server, port } = await fakeServer()
   const cdp = launch()
   try {
@@ -327,15 +332,25 @@ test('external temperature: top-right of the gauge, clear of the arc, the -/+ an
       assert.equal(got.d13.shown, false, `no temperature without sensorTemperature (${width} px)`)
       const g = got.d16
       const at = `${width} px: ${JSON.stringify(g)}`
-      assert.ok(g.shown && g.text === '-12.4 °C', `shown with one decimal (${at})`)
-      assert.ok(g.oneLine && g.insideCard, `one line, inside the card (${at})`)
-      assert.ok(g.clearOfHeader, `does not touch the name, the LAN dot or the power button (${at})`)
-      assert.ok(g.clearOfArc >= 2, `clear of the gauge arc (${at})`)
-      if (!mobile) assert.ok(g.plusRightOfRing && g.gapToPlus >= 16, `clear of the -/+ column (${at})`)
+      assert.ok(g.shown && g.text === '-12.4 °F', `value with one decimal and the unit from the state (${at})`)
+      assert.ok(g.oneLine && g.belowCurrent >= 2 && Math.abs(g.centred) <= 2, `one line, centred under the humidity (${at})`)
+      assert.ok(Math.abs(g.fontPx - g.currentPx) <= 1, `about the size of the humidity line (${at})`)
+      assert.ok(g.insideArc >= 2 && g.clearOfEnds, `inside the arc, clear of the 30 / 80 labels (${at})`)
+      // A click on the temperature: no focus ring, no selection, the target does not move.
+      const pt = JSON.parse(await evaluate("(() => { const b = document.querySelector('#device-d16 .ext-temp').getBoundingClientRect(); return JSON.stringify([b.left + b.width / 2, b.top + b.height / 2]) })()"))
+      const tgt = await evaluate("document.querySelector('#device-d16 [data-r=target]').textContent")
+      for (const type of ['mousePressed', 'mouseReleased']) await s('Input.dispatchMouseEvent', { type, x: pt[0], y: pt[1], button: 'left', clickCount: 1 })
+      await sleep(150)
+      const after1 = JSON.parse(await evaluate("(() => { const r = document.querySelector('#device-d16 .ring'); return JSON.stringify({ outline: getComputedStyle(r).outlineStyle, sel: String(getSelection()), target: document.querySelector('#device-d16 [data-r=target]').textContent }) })()"))
+      assert.equal(after1.outline, 'none', `no focus ring after a click on the temperature (${width} px)`)
+      assert.equal(after1.sel, '', `nothing selected (${width} px)`)
+      assert.equal(after1.target, tgt, `the target does not move (${width} px)`)
       st.D.d16.sensorTemperature = null
       for (let i = 0; i < 50 && !(await evaluate("document.querySelector('#device-d16 .ext-temp').hidden")); i++) await sleep(100)
       const after = JSON.parse(await evaluate(MEASURE))
+      const gone = JSON.parse(await evaluate(TEMP))
       assert.deepEqual(after, before, `hiding the temperature moves nothing (${width} px)`)
+      assert.deepEqual(gone.d16.fixed, g.fixed, `target and humidity line stay put (${width} px)`)
       st.D = units()
     }
   } finally {

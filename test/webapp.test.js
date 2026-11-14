@@ -134,16 +134,28 @@ test('status: uppercase text labels centred under the modes (same column), then 
   assert.equal(/class="extras"/.test(tpl) || /\.extras/.test(css), false, 'old status block is gone')
 })
 
-test('external temperature: small, top-right corner of the gauge box, absolute, hidden until the state has a fresh value', () => {
-  const span = (tpl.match(/<div class="ring"[\s\S]*?<span class="ext-temp"[^>]*>/) || [])[0]
-  assert.ok(span, 'inside the gauge box (.ring)')
-  assert.ok(/class="ext-temp"[^>]*aria-hidden="true"[^>]*hidden/.test(tpl), 'hidden by default, decorative (the value is in the slider label)')
+test('external temperature: a line under the current humidity in the gauge centre, absolute, hidden until the state has a fresh value', () => {
+  assert.ok(/<div class="current" data-r="current">[\s\S]*?<span class="ext-temp" data-r="extTemp" aria-hidden="true" hidden>[\s\S]*?<\/span><\/span><\/div>/.test(tpl), 'hung under .current, hidden by default, decorative (the value is in the slider label)')
   assert.ok(/href="#i-thermo"/.test(tpl) && /<symbol id="i-thermo"/.test(html), 'thermometer glyph')
   const rule = (css.match(/\.ext-temp \{[^}]*\}/) || [''])[0]
-  assert.ok(/position: absolute/.test(rule) && /top: -?\d+px/.test(rule) && /right: -?\d+px/.test(rule), 'absolute, top-right: no layout shift')
-  assert.ok(/pointer-events: none/.test(rule) && /white-space: nowrap/.test(rule), 'does not block the arc drag, one line')
-  assert.ok(/next\.sensorTemperature/.test(app) && /toFixed\(1\)\} °C/.test(app), 'value from the device state, one decimal °C')
+  assert.ok(/\.current \{ position: relative; \}/.test(css), '.current is the anchor')
+  assert.ok(/position: absolute/.test(rule) && /top: calc\(100% \+ \d+px\)/.test(rule) && /left: 50%/.test(rule) && /translateX\(-50%\)/.test(rule), 'absolute, centred under the humidity line: no shift')
+  const fs1 = Number((rule.match(/font-size: (\d+)px/) || [])[1])
+  const fs2 = Number(((css.match(/\.current \{\s*display: flex;[^}]*\}/) || [''])[0].match(/font-size: (\d+)px/) || [])[1])
+  assert.ok(fs1 && fs2 && Math.abs(fs1 - fs2) <= 1, 'about the size of the current-humidity line')
+  assert.ok(/pointer-events: none/.test(rule) && /white-space: nowrap/.test(rule), 'a tap on it is a tap on the gauge, one line')
+  assert.ok(/next\.sensorTemperature/.test(app) && /toFixed\(1\)\} \$\{st\.unit \|\| '°C'\}/.test(app), 'value and unit from the device state (Signal K preferences), °C fallback')
   assert.ok(/show\(e\.extTemp, Boolean\(tText\)\)/.test(app), 'shown only with a value, in every mode')
+})
+
+test('gauge: a click or tap never selects text or shows the focus ring; only the arc moves the target', () => {
+  assert.ok(/\.ring, \.ring \* \{[^}]*user-select: none;[^}]*-webkit-tap-highlight-color: transparent;/.test(css), 'no selection or tap highlight')
+  assert.ok(/\.ring\[data-pointer\]:focus-visible[^{]*\{ outline: none; \}/.test(css), 'no ring after a pointer press')
+  assert.ok(/\.ring:focus-visible \{ outline-offset/.test(css), 'keyboard focus ring kept')
+  const down = (app.match(/track\.addEventListener\('pointerdown', \(ev\) => \{[\s\S]*?\n    \}\)/) || [''])[0]
+  assert.ok(down.indexOf('ev.preventDefault()') >= 0 && down.indexOf('ev.preventDefault()') < down.indexOf('fromPoint('), 'native focus/selection prevented before the arc test')
+  assert.ok(/if \(v === null\) return/.test(down), 'a press off the arc (centre, temperature) does nothing')
+  assert.ok(/addEventListener\('keydown', \(ev\) => \{\s*delete track\.dataset\.pointer/.test(app) && /addEventListener\('blur', \(\) => \{ delete track\.dataset\.pointer \}\)/.test(app), 'keyboard brings the ring back')
 })
 
 test('App Store icon: appIcon is ./icon.svg (resolved against public/), with a copy at the package root', () => {

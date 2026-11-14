@@ -228,10 +228,13 @@ class DeviceView {
       return r.min + (deg / ARC.sweep) * (r.max - r.min)
     }
     track.addEventListener('pointerdown', (ev) => {
+      // A pointer press never focuses the gauge natively, selects text or shows
+      // the focus ring; only a press on the arc moves the target.
+      ev.preventDefault()
+      track.dataset.pointer = '1'
       if (track.getAttribute('aria-disabled') === 'true') return
       const v = fromPoint(ev.clientX, ev.clientY, true)
       if (v === null) return
-      ev.preventDefault()
       dragging = true
       try { track.setPointerCapture(ev.pointerId) } catch {}
       track.focus({ preventScroll: true })
@@ -239,9 +242,11 @@ class DeviceView {
     })
     track.addEventListener('pointermove', (ev) => { if (dragging) this.setTarget(fromPoint(ev.clientX, ev.clientY, false)) })
     const stop = () => { dragging = false }
+    track.addEventListener('blur', () => { delete track.dataset.pointer })
     track.addEventListener('pointerup', stop)
     track.addEventListener('pointercancel', stop)
     track.addEventListener('keydown', (ev) => {
+      delete track.dataset.pointer // keyboard: the focus ring is shown again
       if (track.getAttribute('aria-disabled') === 'true') return
       const r = this.range()
       const dir = { ArrowRight: 1, ArrowUp: 1, PageUp: 2, ArrowLeft: -1, ArrowDown: -1, PageDown: -2 }[ev.key]
@@ -470,7 +475,7 @@ class DeviceView {
     // top-right corner of the gauge, in every mode, only while the value is fresh.
     const st = next.sensorTemperature
     const tC = st ? num(st.value) : NaN
-    const tText = Number.isFinite(tC) ? `${tC.toFixed(1)} °C` : ''
+    const tText = Number.isFinite(tC) ? `${tC.toFixed(1)} ${st.unit || '°C'}` : ''
     show(e.extTemp, Boolean(tText))
     if (e.extTempValue.textContent !== tText) e.extTempValue.textContent = tText
     const tTip = tText ? `External temperature ${tText}${st.path ? ` (${st.path})` : ''}` : ''
@@ -578,7 +583,7 @@ class DeviceView {
     // External sensor: no status label any more; its state is in the External
     // mode button's tooltip, and warnings go to the message line below.
     const extLabel = EXT_STATE[ctl.state] || ctl.state || '—'
-    const temp = Number.isFinite(num(ctl.sourceTemperature)) ? ` · ${Number(ctl.sourceTemperature).toFixed(1)} °C` : ''
+    const temp = tText ? ` · ${tText}` : Number.isFinite(num(ctl.sourceTemperature)) ? ` · ${Number(ctl.sourceTemperature).toFixed(1)} °C` : ''
     const extBtn = e.modes.querySelector('[data-mode="external"]')
     if (extBtn) {
       const tip = extOn ? `External sensor: ${extLabel}${temp}${ctl.reason ? `\n${ctl.reason}` : ''}` : 'Auto / external sensor (off)'

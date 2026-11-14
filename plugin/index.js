@@ -174,6 +174,9 @@ module.exports = function factory(app, injected = {}) {
    * so it is there in every mode, not only while external control runs.
    * null when external control is not allowed, no path is set, or the value is
    * missing or older than the sensor-lost time.
+   * The unit follows Signal K's unit preferences for that path (server 2.x:
+   * app.getDisplayUnits / app.convertToDisplayUnits, the active preset, e.g.
+   * nautical-metric -> °C, imperial -> °F); °C when the server has none.
    */
   function sensorTemperature(entry, now = Date.now()) {
     const ext = entry.cfg.externalControl || {}
@@ -183,7 +186,30 @@ module.exports = function factory(app, injected = {}) {
     const c = toCelsius(r.value)
     const staleMs = (Number(ext.staleMinutes) > 0 ? Number(ext.staleMinutes) : 5) * 60 * 1000
     if (c === null || !Number.isFinite(r.at) || now - r.at > staleMs) return null
-    return { path: ext.temperaturePath, value: Math.round(c * 10) / 10, at: new Date(r.at).toISOString() }
+    const shown = displayTemperature(ext.temperaturePath, c + 273.15)
+    return { path: ext.temperaturePath, value: round1(shown.value), unit: shown.unit, unitSource: shown.source, celsius: round1(c), at: new Date(r.at).toISOString() }
+  }
+
+  function displayTemperature(skPath, kelvin) {
+    const byUnit = { C: ['°C', kelvin - 273.15], F: ['°F', (kelvin - 273.15) * 9 / 5 + 32], K: ['K', kelvin] }
+    let du = null
+    try { du = typeof app.getDisplayUnits === 'function' ? app.getDisplayUnits(skPath) : null } catch { du = null }
+    if (du && typeof du === 'object') {
+      try {
+        const conv = typeof app.convertToDisplayUnits === 'function' ? app.convertToDisplayUnits(skPath, kelvin) : null
+        if (conv && Number.isFinite(conv.value)) {
+          const sym = conv.symbol || du.symbol || (byUnit[du.targetUnit] || [])[0] || ''
+          return { value: conv.value, unit: sym, source: 'signalk' }
+        }
+      } catch { /* fall through to the unit name */ }
+      const known = byUnit[String(du.targetUnit || '').replace(/^°/, '').toUpperCase()]
+      if (known) return { value: known[1], unit: du.symbol || known[0], source: 'signalk' }
+    }
+    return { value: kelvin - 273.15, unit: '°C', source: 'default' }
+  }
+
+  function round1(n) {
+    return Math.round(n * 10) / 10
   }
 
   function controlState(entry, unitState) {
