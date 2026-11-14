@@ -39,7 +39,8 @@ function units() {
       ...base, key: 'd16', name: 'D16', mode: 'external', targetHumidity: 50, fan: 'high', timerHours: 0,
       controls: { power: true, mode: true, targetHumidity: true, fan: true, childLock: true, timer: true },
       modes: [{ value: 'auto', label: 'Normal' }, { value: 'laundry', label: 'Laundry' }, { value: 'purify', label: 'Purify' }, { value: 'sleep', label: 'Sleep' }, { value: 'external', label: 'Auto / external sensor' }],
-      control: { configured: true, available: true, mode: 'external', target: 50, state: 'running', reason: '', sourceHumidity: 62 }
+      control: { configured: true, available: true, mode: 'external', target: 50, state: 'running', reason: '', sourceHumidity: 62 },
+      sensorTemperature: { path: 'environment.inside.mainCabin.temperature', value: -12.4 }
     }
   }
 }
@@ -272,6 +273,70 @@ test('desktop: gauge at the same x on every card, modes centred in the rest, sta
         assert.ok(Math.abs(g.modesCentred) <= 2, `modes (and fan) centred in the space above the status labels (${at})`)
         assert.ok(g.msgInside, `message inside the card (${at})`)
       }
+    }
+  } finally {
+    cdp.close()
+    server.close()
+  }
+})
+
+const TEMP = `(() => {
+  const out = {}
+  for (const p of document.querySelectorAll('.panel[data-key]')) {
+    const t = p.querySelector('.ext-temp')
+    if (t.hidden) { out[p.dataset.key] = { shown: false }; continue }
+    const b = (el) => el.getBoundingClientRect()
+    const tb = b(t), pr = b(p), rg = b(p.querySelector('.ring')), plus = b(p.querySelector('.step-plus'))
+    const pad = parseFloat(getComputedStyle(p).paddingRight)
+    const cx = rg.left + rg.width / 2, cy = rg.top + rg.height / 2
+    const nx = Math.max(tb.left, Math.min(cx, tb.right)), ny = Math.max(tb.top, Math.min(cy, tb.bottom))
+    const sw = parseFloat(getComputedStyle(p.querySelector('.arc-fill')).strokeWidth) || 4
+    out[p.dataset.key] = {
+      shown: true,
+      text: t.textContent.trim(),
+      oneLine: tb.height < 20,
+      insideCard: tb.left >= pr.left + 8 && tb.right <= pr.right - pad + 1,
+      clearOfHeader: [...p.querySelector('header').querySelectorAll('*')].filter((el) => el.getClientRects().length).every((el) => { const r = b(el); return r.right <= tb.left || r.left >= tb.right || r.bottom <= tb.top || r.top >= tb.bottom }),
+      clearOfArc: Math.round(Math.hypot(nx - cx, ny - cy) - (rg.width / 2) * 86 / 100 - sw * rg.width / 400),
+      gapToPlus: Math.round(plus.left - tb.right),
+      plusRightOfRing: plus.left > rg.right
+    }
+  }
+  return JSON.stringify(out)
+})()`
+test('external temperature: top-right of the gauge, clear of the arc, the -/+ and the header (desktop and phone)', { skip: !CHROME && 'no Chrome/Chromium found', timeout: 90000 }, async () => {
+  const { st, server, port } = await fakeServer()
+  const cdp = launch()
+  try {
+    const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank' })
+    const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true })
+    const s = (m, p) => cdp.send(m, p, sessionId)
+    const evaluate = async (expression) => {
+      const res = await s('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
+      if (res.exceptionDetails) throw new Error(res.exceptionDetails.exception ? res.exceptionDetails.exception.description : res.exceptionDetails.text)
+      return res.result.value
+    }
+    st.D = units()
+    for (const [width, mobile] of [[1024, false], [1280, false], [1600, false], [390, true], [360, true]]) {
+      await s('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile })
+      await s('Page.navigate', { url: `http://127.0.0.1:${port}/signalk-alecoair/` })
+      for (let i = 0; i < 100 && !(await evaluate("document.querySelectorAll('.panel[data-key] .mode').length === 9")); i++) await sleep(100)
+      for (let i = 0; i < 50 && (await evaluate("document.querySelector('#device-d16 .ext-temp').hidden")); i++) await sleep(100)
+      const before = JSON.parse(await evaluate(MEASURE))
+      const got = JSON.parse(await evaluate(TEMP))
+      assert.equal(got.d13.shown, false, `no temperature without sensorTemperature (${width} px)`)
+      const g = got.d16
+      const at = `${width} px: ${JSON.stringify(g)}`
+      assert.ok(g.shown && g.text === '-12.4 °C', `shown with one decimal (${at})`)
+      assert.ok(g.oneLine && g.insideCard, `one line, inside the card (${at})`)
+      assert.ok(g.clearOfHeader, `does not touch the name, the LAN dot or the power button (${at})`)
+      assert.ok(g.clearOfArc >= 2, `clear of the gauge arc (${at})`)
+      if (!mobile) assert.ok(g.plusRightOfRing && g.gapToPlus >= 16, `clear of the -/+ column (${at})`)
+      st.D.d16.sensorTemperature = null
+      for (let i = 0; i < 50 && !(await evaluate("document.querySelector('#device-d16 .ext-temp').hidden")); i++) await sleep(100)
+      const after = JSON.parse(await evaluate(MEASURE))
+      assert.deepEqual(after, before, `hiding the temperature moves nothing (${width} px)`)
+      st.D = units()
     }
   } finally {
     cdp.close()

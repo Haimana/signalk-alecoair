@@ -466,6 +466,16 @@ class DeviceView {
       : `Humidity at the unit ${curText}`
     e.current.setAttribute('aria-label', e.current.title)
 
+    // External temperature sensor (Admin → External control → Temperature path):
+    // top-right corner of the gauge, in every mode, only while the value is fresh.
+    const st = next.sensorTemperature
+    const tC = st ? num(st.value) : NaN
+    const tText = Number.isFinite(tC) ? `${tC.toFixed(1)} °C` : ''
+    show(e.extTemp, Boolean(tText))
+    if (e.extTempValue.textContent !== tText) e.extTempValue.textContent = tText
+    const tTip = tText ? `External temperature ${tText}${st.path ? ` (${st.path})` : ''}` : ''
+    if (e.extTemp.title !== tTip) e.extTemp.title = tTip
+
     // Gauge: thin background arc, thicker bright arc up to the current humidity, knob on the target.
     e.minus.style.visibility = canTarget ? '' : 'hidden'
     e.plus.style.visibility = canTarget ? '' : 'hidden'
@@ -483,7 +493,7 @@ class DeviceView {
     e.knob.setAttribute('visibility', showKnob ? 'visible' : 'hidden')
     e.track.setAttribute('aria-valuenow', String(Math.round(target)))
     e.track.setAttribute('aria-valuetext', continuous ? 'Continuous' : `Target ${Math.round(target)} percent`)
-    e.track.setAttribute('aria-label', extOn ? 'External sensor target humidity' : 'Target humidity')
+    e.track.setAttribute('aria-label', (extOn ? 'External sensor target humidity' : 'Target humidity') + (tText ? ` · external temperature ${tText}` : ''))
     e.track.setAttribute('aria-disabled', String(!connected || !canTarget))
     e.track.tabIndex = canTarget ? 0 : -1
     e.minus.setAttribute('aria-label', extOn ? 'Lower external target' : 'Lower target humidity')

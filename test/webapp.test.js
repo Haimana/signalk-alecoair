@@ -133,3 +133,15 @@ test('status: uppercase text labels centred under the modes (same column), then 
   assert.ok(/\.stat\.lit \{ color: #fff;/.test(css) && /\.stat\.danger\.lit \{ color: var\(--red\);/.test(css), 'bright when active, tank full in red')
   assert.equal(/class="extras"/.test(tpl) || /\.extras/.test(css), false, 'old status block is gone')
 })
+
+test('external temperature: small, top-right corner of the gauge box, absolute, hidden until the state has a fresh value', () => {
+  const span = (tpl.match(/<div class="ring"[\s\S]*?<span class="ext-temp"[^>]*>/) || [])[0]
+  assert.ok(span, 'inside the gauge box (.ring)')
+  assert.ok(/class="ext-temp"[^>]*aria-hidden="true"[^>]*hidden/.test(tpl), 'hidden by default, decorative (the value is in the slider label)')
+  assert.ok(/href="#i-thermo"/.test(tpl) && /<symbol id="i-thermo"/.test(html), 'thermometer glyph')
+  const rule = (css.match(/\.ext-temp \{[^}]*\}/) || [''])[0]
+  assert.ok(/position: absolute/.test(rule) && /top: -?\d+px/.test(rule) && /right: -?\d+px/.test(rule), 'absolute, top-right: no layout shift')
+  assert.ok(/pointer-events: none/.test(rule) && /white-space: nowrap/.test(rule), 'does not block the arc drag, one line')
+  assert.ok(/next\.sensorTemperature/.test(app) && /toFixed\(1\)\} °C/.test(app), 'value from the device state, one decimal °C')
+  assert.ok(/show\(e\.extTemp, Boolean\(tText\)\)/.test(app), 'shown only with a value, in every mode')
+})

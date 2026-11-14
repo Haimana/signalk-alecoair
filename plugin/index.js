@@ -131,7 +131,7 @@ module.exports = function factory(app, injected = {}) {
     const s = entry.runtime.getPublicState()
     const control = controlState(entry, s)
     const ui = entry.cfg.ui || {}
-    const out = { ...s, name: entry.cfg.name, control, unitMode: s.mode, ui: { showChildLock: ui.showChildLock === true, showTimer: ui.showTimer === true } }
+    const out = { ...s, name: entry.cfg.name, control, unitMode: s.mode, ui: { showChildLock: ui.showChildLock === true, showTimer: ui.showTimer === true }, sensorTemperature: sensorTemperature(entry) }
     if (control.configured && control.available && s.controls && s.controls.mode) {
       const modes = (s.modes || []).slice()
       modes.splice(Math.min(1, modes.length), 0, { value: EXTERNAL_MODE, label: EXTERNAL_LABEL })
@@ -166,6 +166,24 @@ module.exports = function factory(app, injected = {}) {
     }
     if (Object.keys(cmd).length) await entry.runtime.command(cmd)
     return publicDeviceState(entry)
+  }
+
+  /**
+   * The external temperature sensor (Admin → External control → Temperature
+   * path) for the WebApp: read straight from Signal K on every state request,
+   * so it is there in every mode, not only while external control runs.
+   * null when external control is not allowed, no path is set, or the value is
+   * missing or older than the sensor-lost time.
+   */
+  function sensorTemperature(entry, now = Date.now()) {
+    const ext = entry.cfg.externalControl || {}
+    if (!ext.enabled || !ext.temperaturePath) return null
+    const r = readSensor(ext.temperaturePath)
+    if (!r) return null
+    const c = toCelsius(r.value)
+    const staleMs = (Number(ext.staleMinutes) > 0 ? Number(ext.staleMinutes) : 5) * 60 * 1000
+    if (c === null || !Number.isFinite(r.at) || now - r.at > staleMs) return null
+    return { path: ext.temperaturePath, value: Math.round(c * 10) / 10, at: new Date(r.at).toISOString() }
   }
 
   function controlState(entry, unitState) {

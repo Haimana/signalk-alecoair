@@ -256,6 +256,23 @@ button:focus-visible, .ring:focus-visible, a:focus-visible {
 }
 .end-min { left: 19.5%; transform: translateX(-50%); }
 .end-max { left: 80.5%; transform: translateX(-50%); }
+/* External temperature: small, in the gauge box's top-right corner, outside the
+   arc (the arc never reaches that corner). Absolute, so it never moves anything. */
+.ext-temp {
+  position: absolute;
+  top: 4px;
+  right: -14px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--mid);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.ext-temp svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
 
 /* Desktop: − / + stacked (+ on top) in their own column, centred on the gauge. */
 .steppers {

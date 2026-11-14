@@ -263,3 +263,37 @@ test('a change made on the unit ends external control in the plugin: mode intern
   await plugin.stop()
   assert.equal(FakeLan.writes.length, writes, 'plugin stop does not restore anything either')
 })
+
+test('device state carries the external temperature in every mode while it is fresh', async () => {
+  const TEMP = 'environment.inside.mainCabin.temperature'
+  const { dataRoot, options } = install({ enabled: true, humidityPath: SENSOR, temperaturePath: TEMP, staleMinutes: 5 })
+  const sensors = { [SENSOR]: fresh(0.55), [TEMP]: fresh(291.55) }
+  const { plugin, router } = boot(dataRoot, sensors)
+  await plugin.start(options)
+  await wait(20)
+  const state = async () => (await router.call('GET', '/devices/:key/state', { params: { key: 'd13' } })).body
+  let st = await state()
+  assert.equal(st.control.mode, 'internal', 'external control is not running')
+  assert.equal(st.sensorTemperature.value, 18.4, 'Kelvin -> °C, one decimal')
+  assert.equal(st.sensorTemperature.path, TEMP)
+  sensors[TEMP] = { value: 291.55, $source: 'x', timestamp: new Date(Date.now() - 6 * 60 * 1000).toISOString() }
+  st = await state()
+  assert.equal(st.sensorTemperature, null, 'stale (older than the sensor-lost time): hidden')
+  delete sensors[TEMP]
+  st = await state()
+  assert.equal(st.sensorTemperature, null, 'no value: hidden')
+  await plugin.stop()
+})
+
+test('no external temperature without a temperature path or with external control off', async () => {
+  const TEMP = 'environment.inside.mainCabin.temperature'
+  for (const ext of [{ enabled: true, humidityPath: SENSOR }, { enabled: false, humidityPath: SENSOR, temperaturePath: TEMP }, undefined]) {
+    const { dataRoot, options } = install(ext)
+    const { plugin, router } = boot(dataRoot, { [SENSOR]: fresh(0.55), [TEMP]: fresh(291.55) })
+    await plugin.start(options)
+    await wait(20)
+    const st = (await router.call('GET', '/devices/:key/state', { params: { key: 'd13' } })).body
+    assert.equal(st.sensorTemperature, null, JSON.stringify(ext))
+    await plugin.stop()
+  }
+})
