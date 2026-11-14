@@ -23,7 +23,8 @@
     ]
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "release-notes": "sh scripts/release-notes.sh"
   },
   "engines": {
     "node": ">=18"

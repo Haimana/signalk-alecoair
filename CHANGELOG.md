@@ -4,18 +4,32 @@ All notable changes to this project are documented in this file.
 
 ## 0.0.5 (2026-11-14)
 
-- WebApp: the external temperature sensor (Admin → External control → Temperature path) is shown in the centre of the gauge, as a line under the current humidity with a thermometer glyph, about the same size, one decimal. It shows in every mode, not only while External runs, and is hidden when there is no path or the value is missing or older than the sensor-lost time. It hangs absolutely under the humidity line, so the big target and the layout do not move.
-- Temperature unit from Signal K: the plugin converts with the server's unit preferences for that path (`app.getDisplayUnits` / `app.convertToDisplayUnits`, Signal K 2.x, i.e. the active preset: °C, °F or K); °C when the server has none.
-- Plugin: the device state (`GET /devices/<key>/state`) has `sensorTemperature: { path, value, unit, unitSource ('signalk' | 'default'), celsius, at }` or `null`, read from Signal K on every request, so it is there whether or not external control is running.
-- WebApp: a click or tap on the gauge no longer shows a focus ring around it or selects text; only a press on the arc moves the target (a press in the centre still does nothing). The focus ring stays for keyboard use.
-- External control no longer drops to Auto after a restart. Cause: on a plugin restart (every Admin save, every Signal K restart) the old instance handed the unit back to its hygrostat (Manual 50, on) and the new one could read the unit's previous CO state before that hand-back landed, so ~30 s later the hand-back looked like a change made on the unit and External switched itself off.
-  - Resume: the first take-over after a start always sends CO and the saved on/off again, even when the unit already reports them.
-  - Confirmation: a command counts only once the unit reports it (at least 15 s later); only a confirmed state that then changes ends External. An unconfirmed or stale reading gets the command again every 30 s instead (error state after 3 tries).
-  - No blip: stop() hands the unit back only when External really ends (plugin disabled, unit removed or disabled, External switched off in Admin). An Admin save keeps the unit as it is; so does a Signal K stop or restart, unless the new option **When Signal K stops or restarts** is set to *own hygrostat*. Uses Signal K 2.x's `stop({ reason })` plus the saved options on disk; older servers: options on disk only. The stop decision is recorded in the store.
-- External stop note: when External ends because the unit was changed outside the plugin, the reason and time are kept (store, `control.lastExit`) and shown on the card's message line (*External stopped at 10:33: the unit was changed outside the plugin (power switched off).*) until External or another mode is picked, or for 12 h. `control.reason` keeps it instead of being overwritten on the next tick.
-- Signal K log: every External on / off with its cause, resume after start, sensor lost / back and every stop decision is written to stdout (`journalctl -u signalk`, `signalk-alecoair: …`).
-- README: behaviour on restart, Signal K crash and power loss.
-- App Store / Admin Webapps icon: `signalk.appIcon` is now `./icon.svg`. Admin resolves it against the WebApp root (`public/`), so `./public/icon.svg` gave a 404. `icon.svg` is also published at the package root for the App Store's icon lookup.
+### External control: restarts no longer end External
+
+- Fixed: a unit in External sometimes dropped to Auto without anyone touching it. On every plugin restart (each Admin save, each Signal K restart) the stopping plugin gave the unit its own hygrostat back, and the starting one could still read the unit's old CO state. About 30 s later the hand-back looked like a change made on the unit, so External switched itself off.
+- Resume after a start: the first take-over always sends CO and the controller's last on/off choice again, even when the unit already reports them. Target and minimum on/off times carry over as before.
+- Confirmed states only: a command counts once the unit reports it, at least 15 s after it was sent. Only a confirmed state that then changes is treated as a change made on the unit. A reading that does not match yet, or a stale one, never ends External; the command is sent again every 30 s (state `error` after 3 tries).
+- No Auto blip on a restart: the unit gets its own hygrostat back at stop only when External really ends: plugin disabled, unit removed or disabled, or external control switched off in Admin. An Admin save leaves the unit as it is, and so does a Signal K stop or restart by default.
+- New option in Admin → **External control**: **When Signal K stops or restarts**. *Keep the unit as it is; resume External on start* (default) or *Back to the unit's own hygrostat* (the behaviour of 0.0.4).
+- How the plugin tells these apart: Signal K 2.x passes the reason to the plugin's stop (`restart`, `disable`, `shutdown`), and the plugin also reads its saved options on disk. Older servers pass no reason; then the saved options decide alone, and if they cannot be read the unit gets its hygrostat back. The decision is recorded in the plugin's store.
+- If Signal K crashes, is killed or the Pi loses power, nothing can be sent: the unit keeps what the controller last set (on in CO it dries until the tank is full; off stays off). External resumes when Signal K is back. The README has a new section on restarts, crashes and power loss.
+
+### External control: why it stopped
+
+- When External ends because the unit was changed outside the plugin, the card's message line says when and why, for example *External stopped at 10:33: the unit was changed outside the plugin (power switched off).* The note survives restarts and stays until you pick External or another mode, or for 12 h.
+- `control.reason` keeps that reason instead of being overwritten on the next tick.
+- Signal K log: every External on and off with its cause, the resume after a start, sensor lost and back, and every stop decision are written to the server log (`journalctl -u signalk`, lines starting with `signalk-alecoair:`), without debug logging.
+- API: the control block of the device state also has `confirmed`, `lastExit` (`at`, `cause`, `reason`) and `onShutdown`.
+
+### WebApp
+
+- External temperature: the temperature path set in Admin → **External control** is shown in the centre of the gauge, as a line under the current humidity with a thermometer glyph, about the same size, one decimal. It shows in every mode, not only while External runs, as long as external control is allowed for the unit. It is hidden when there is no path or the value is missing or older than the sensor-lost time. The big target and the layout do not move.
+- The temperature follows Signal K's unit preferences for that path (Signal K 2.x, the active preset: °C, °F or K); °C when the server has none. The device state (`GET /devices/{key}/state`) has a new `sensorTemperature` field (`path`, `value`, `unit`, `unitSource`, `celsius`, `at`, or `null`).
+- A click or tap on the gauge no longer shows a focus ring or selects text. Only a press on the arc moves the target; the focus ring stays for keyboard use.
+
+### App Store
+
+- Fixed the plugin icon in Admin → Webapps and the App Store: `signalk.appIcon` is now `./icon.svg` (it gave a 404 as `./public/icon.svg`), and `icon.svg` is also published at the package root.
 
 ## 0.0.4 (2026-11-13)
 
