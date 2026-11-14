@@ -7,7 +7,7 @@ Signal K plugin and WebApp for AlecoAir Wi-Fi dehumidifiers over Tuya LAN: sever
 - **Setup only in Signal K Admin**, in the plugin's own configurator: **Apps & Plugins → Configuration → AlecoAir dehumidifiers**.
 - **The WebApp is for use only**: control and monitoring at `http://<signalk>:3000/signalk-alecoair/`.
 
-> Version 0.0.4, an early release: only the D13 Traditio has been verified on a real unit. Pure Node.js: no Python or other system packages.
+> Version 0.0.5, an early release: only the D13 Traditio has been verified on a real unit. Pure Node.js: no Python or other system packages.
 
 - **External sensor control** (optional, per unit): the plugin can drive a unit from another Signal K humidity sensor, with its own target, hysteresis and minimum on/off times. See [External sensor control](#external-sensor-control).
 
@@ -120,6 +120,7 @@ Open `http://<signalk>:3000/signalk-alecoair/` (also listed under **Webapps** in
 Each card shows the unit's real modes for its profile and only the controls the unit actually reports. The D13 Traditio has no fan control, so none is shown for it.
 
 - **Gauge (left):** a 270° arc. The thin track is the unit's range (30–80% on the Traditio), the brighter arc goes up to the current humidity, and the knob is the target. Tap or drag on the arc, or use **−** / **+** next to it, to change the target in the unit's own steps (5%). The big number in the centre is the target (`CO` in continuous mode); the small one below it is the current humidity, with a droplet for the unit's own sensor or an antenna for the external sensor.
+- **External temperature:** when external control is allowed for the unit and a **Temperature path** is set (Admin → External control), the gauge's top-right corner shows that sensor's temperature, e.g. a thermometer and 18.4 °C (Kelvin converted to °C, one decimal). It is shown in every mode, not only in External, and hidden while the value is missing or older than the *Sensor lost after* time.
 - **Working modes (right):** one icon button per mode, e.g. **Auto**, **CO**, **Sleep** and, when external control is allowed for the unit, **External**. The fan speed (**Low** / **High**) sits under the modes if the unit has a fan.
 - **Status:** text labels under the modes: **Compressor**, **Defrost**, **Tank full** (red when full) and, where the unit has them, **Sleep** and **Inside dry**. Bright = active, dim = inactive. **Child lock** and **Timer** are hidden by default; tick **Show child lock in UI** / **Show timer in UI** for a unit in Admin → Plugin Config → AlecoAir to show them. These checkboxes only change the WebApp: the Signal K paths and PUT handlers stay as they are. Child lock, timer, sleep and inside dry can be tapped; the timer opens a small − / + stepper.
 - **Message line:** under the status, one line per card for errors, an unreachable unit, a full tank, defrost or an external-sensor warning. It never moves the layout: one line on a desktop (the full text is in the tooltip), two lines on a phone. If the WebApp loses the plugin, a toast appears at the top of the page.

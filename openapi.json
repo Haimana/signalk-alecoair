@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "AlecoAir dehumidifiers (signalk-alecoair)",
-    "version": "0.0.4",
+    "version": "0.0.5",
     "description": "Usage API for the WebApp and dashboards, plus the admin-only setup API used by the Plugin Config panel. Local keys are never returned."
   },
   "servers": [{ "url": "/plugins/signalk-alecoair" }],
@@ -14,7 +14,7 @@
       "get": {
         "summary": "State, controls and capabilities of one device",
         "parameters": [{ "name": "key", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "Device state" }, "404": { "description": "Unknown device" } }
+        "responses": { "200": { "description": "Device state. sensorTemperature: { path, value (°C, one decimal), at } from the External control temperature path while the value is fresh, else null" }, "404": { "description": "Unknown device" } }
       }
     },
     "/devices/{key}/command": {
