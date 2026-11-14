@@ -165,3 +165,13 @@ test('App Store icon: appIcon is ./icon.svg (resolved against public/), with a c
   assert.ok(pkg.files.includes('icon.svg') && pkg.files.includes('public'), 'both copies are published')
   assert.equal(fs.readFileSync(path.join(root, 'icon.svg'), 'utf8'), fs.readFileSync(path.join(pub, 'icon.svg'), 'utf8'), 'the two copies are the same')
 })
+
+test('External stop note: the card message line says when and why External stopped, while the unit is not in External', () => {
+  assert.ok(/else if \(!extOn && ctl\.lastExit\) setMsg\(e\.msg, exitText\(ctl\.lastExit\)\)/.test(app), 'shown from control.lastExit, below tank / defrost / offline messages')
+  const src = (app.match(/function exitText\(x\) \{[\s\S]*?\n\}/) || [])[0]
+  assert.ok(src, 'exitText defined')
+  const exitText = vm.runInNewContext(`(${src.replace('function exitText', 'function')})`)
+  const at = new Date(2026, 10, 14, 10, 33, 0).toISOString()
+  assert.equal(exitText({ at, cause: 'outside', reason: 'The unit was changed outside the plugin (power switched off), so External stopped. Pick External to resume.' }),
+    'External stopped at 10:33: the unit was changed outside the plugin (power switched off).')
+})

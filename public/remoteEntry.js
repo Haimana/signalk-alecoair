@@ -219,7 +219,8 @@
     var EXT_DEFAULTS = {
       enabled: false, humidityPath: '', temperaturePath: '', minTemperature: 5,
       hysteresisOn: 3, hysteresisOff: 2, minOnMinutes: 10, minOffMinutes: 10, staleMinutes: 5,
-      onSensorLoss: 'internal'
+      onSensorLoss: 'internal',
+      onShutdown: 'keep'
     }
 
     function fmtValue(row, kind) {
@@ -271,6 +272,10 @@
           h(Field, { label: 'When the sensor is lost', className: 'aa-span2' }, h(Select, {
             value: ext.onSensorLoss, onChange: function (v) { set('onSensorLoss', v) },
             options: [{ value: 'internal', label: 'Back to the unit\u2019s own hygrostat' }, { value: 'off', label: 'Switch the unit off' }]
+          })),
+          h(Field, { label: 'When Signal K stops or restarts', className: 'aa-span2', help: 'Keep: the unit stays as the controller set it and External resumes when Signal K is back (no Auto blip on a restart; if Signal K stays down, a CO unit dries until the tank is full). Own hygrostat: the unit gets its own hygrostat back at every stop. Disabling the plugin, removing the unit or switching External off always gives the hygrostat back.' }, h(Select, {
+            value: ext.onShutdown || 'keep', onChange: function (v) { set('onShutdown', v) },
+            options: [{ value: 'keep', label: 'Keep the unit as it is; resume External on start' }, { value: 'internal', label: 'Back to the unit\u2019s own hygrostat' }]
           }))) : null,
         h('datalist', { id: humId }, (paths.humidity || []).map(function (r) { return h('option', { key: r.path, value: r.path, label: [fmtValue(r, 'humidity'), r.source].filter(Boolean).join(' \u00b7 ') }) })),
         h('datalist', { id: tempId }, (paths.temperature || []).map(function (r) { return h('option', { key: r.path, value: r.path, label: [fmtValue(r, 'temperature'), r.source].filter(Boolean).join(' \u00b7 ') }) })))

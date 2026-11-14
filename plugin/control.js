@@ -22,18 +22,32 @@
  * - Power-off is never sent during defrost (the manual says not to switch
  *   off then); the controller waits until the defrost ends. A full tank is
  *   left to the firmware.
- * - A change on the unit that the controller did not make (app, buttons,
- *   WebApp power/target, Signal K PUT) ends external control at once: the
- *   mode goes back to internal and the unit is left exactly as it is (no
- *   restore, no command). Picking the external mode again resumes it.
+ * - Every command the controller sends (take-over, power switch) has to be
+ *   CONFIRMED: the unit must report the commanded state at a tick at least
+ *   SETTLE_MS after the command (the runtime shows commanded values at once
+ *   and hides contradicting echoes for 10 s, so an earlier reading proves
+ *   nothing). While unconfirmed, a different reading is never taken as a
+ *   manual change: the missing part is sent again every RESEND_MS.
+ * - Once confirmed, a change on the unit that the controller did not make
+ *   (app, buttons, WebApp power/target, Signal K PUT) ends external control
+ *   at once: the mode goes back to internal and the unit is left exactly as
+ *   it is (no restore, no command). The reason and time are kept (lastExit)
+ *   for the WebApp until External is picked again, another mode is picked,
+ *   or LAST_EXIT_MS has passed. Picking the external mode again resumes it.
+ * - After a restart (persisted mode external) the first take-over always
+ *   sends the continuous mode and the persisted power, even when the first
+ *   reading already says so: that reading may predate the hand-back a
+ *   stopping instance sent.
  * - When the sensor goes stale, the chosen fallback is applied once:
  *   'internal' restores the unit's own hygrostat (previous mode and target,
  *   power on), 'off' switches the unit off.
  */
 
 const MIN = 60 * 1000
-const GRACE_MS = 30 * 1000
+const SETTLE_MS = 15 * 1000
+const RESEND_MS = 30 * 1000
 const RETRY_MS = 30 * 1000
+const LAST_EXIT_MS = 12 * 60 * MIN
 
 const DEFAULTS = {
   enabled: false,
@@ -45,7 +59,8 @@ const DEFAULTS = {
   minOnMinutes: 10,
   minOffMinutes: 10,
   staleMinutes: 5,
-  onSensorLoss: 'internal'
+  onSensorLoss: 'internal',
+  onShutdown: 'keep'
 }
 
 function num(v, def, lo, hi) {
@@ -77,7 +92,11 @@ function normalizeControlConfig(raw) {
     minOnMinutes: num(c.minOnMinutes, DEFAULTS.minOnMinutes, 0, 240),
     minOffMinutes: num(c.minOffMinutes, DEFAULTS.minOffMinutes, 0, 240),
     staleMinutes: num(c.staleMinutes, DEFAULTS.staleMinutes, 0.5, 240),
-    onSensorLoss: c.onSensorLoss === 'off' ? 'off' : 'internal'
+    onSensorLoss: c.onSensorLoss === 'off' ? 'off' : 'internal',
+    // Signal K shutting down or restarting (systemctl stop/restart, Admin
+    // Restart): 'keep' leaves the unit as the controller set it, so a restart
+    // has no Auto blip; 'internal' gives it its own hygrostat back.
+    onShutdown: c.onShutdown === 'internal' ? 'internal' : 'keep'
   }
 }
 
@@ -134,7 +153,12 @@ class ExternalController {
     // After a restart: the power the controller had chosen and when it last switched.
     this.resumePower = typeof p.power === 'boolean' ? p.power : null
     this.lastSwitchAt = Number.isFinite(Number(p.lastSwitchAt)) && p.lastSwitchAt !== null ? Number(p.lastSwitchAt) : null
-    this.graceUntil = 0
+    // The first take-over after a restart re-sends CO and the persisted power.
+    this.resuming = this.mode === 'external'
+    this.confirmed = false
+    this.lastCommandAt = 0
+    this.resends = 0
+    this.lastExit = p.lastExit && typeof p.lastExit === 'object' && p.lastExit.at ? { ...p.lastExit } : null
     this.retryAt = 0
     this.lossApplied = false
     this.coldLatched = false
@@ -149,6 +173,7 @@ class ExternalController {
     const out = { mode: this.mode, target: this.target, saved: this.saved }
     if (this.mode === 'external' && typeof this.expectedPower === 'boolean') out.power = this.expectedPower
     if (this.mode === 'external' && this.lastSwitchAt !== null) out.lastSwitchAt = this.lastSwitchAt
+    if (this.lastExit) out.lastExit = this.lastExit
     return out
   }
 
@@ -164,10 +189,11 @@ class ExternalController {
 
   /** Turn external control on. The controller target defaults to the unit's own hygrostat target. */
   enable(unit, target) {
+    this.clearLastExit()
     if (this.mode !== 'external') {
       this.mode = 'external'
       this.inControl = false
-        this.lossApplied = false
+      this.lossApplied = false
       this.markDirty()
     }
     if (target !== undefined) this.setTarget(target, unit)
@@ -188,6 +214,7 @@ class ExternalController {
     this.inControl = false
     this.restorePending = false
     this.saved = null
+    this.lastExit = null
     this.markDirty()
     this.setStatus('internal', 'The unit runs on its own hygrostat.')
     return cmd
@@ -195,6 +222,7 @@ class ExternalController {
 
   /** Turn external control off; the next tick restores the unit's own hygrostat. */
   disable() {
+    this.clearLastExit()
     if (this.mode === 'internal' && !this.restorePending) return
     this.mode = 'internal'
     this.inControl = false
@@ -248,8 +276,25 @@ class ExternalController {
     }
   }
 
+  /** Forget the last exit (External or another mode was picked). */
+  clearLastExit() {
+    if (!this.lastExit) return false
+    this.lastExit = null
+    this.markDirty()
+    return true
+  }
+
+  /** The last exit while it is recent enough to show, else null. */
+  recentExit(now = Date.now()) {
+    const e = this.lastExit
+    if (!e) return null
+    const at = Date.parse(e.at)
+    return Number.isFinite(at) && now - at <= LAST_EXIT_MS ? e : null
+  }
+
   /** External change on the unit: back to internal, adopt the unit as it is (no restore, no command). */
-  exitExternal() {
+  exitExternal(now, cause, reason) {
+    if (now !== undefined) this.lastExit = { at: new Date(now).toISOString(), cause: cause || 'outside', reason: reason || '' }
     this.mode = 'internal'
     this.inControl = false
     this.restorePending = false
@@ -262,6 +307,7 @@ class ExternalController {
   /** A command the caller sent failed: forget control and retry later. */
   commandFailed(now) {
     this.inControl = false
+    this.confirmed = false
     this.retryAt = now + RETRY_MS
   }
 
@@ -302,6 +348,17 @@ class ExternalController {
     return cmd
   }
 
+  /** The unit reports what the controller last commanded. */
+  matches(unit) {
+    return this.inControlMode(unit) && (this.expectedPower === null || Boolean(unit.power) === this.expectedPower)
+  }
+
+  /** A command was just sent: the unit has to confirm it again. */
+  commanded(now) {
+    this.confirmed = false
+    this.lastCommandAt = now
+  }
+
   setStatus(state, reason) {
     this.status = { state, reason: reason || '' }
     return this.status
@@ -332,7 +389,8 @@ class ExternalController {
         this.saved = null
         this.markDirty()
       }
-      return done('internal', 'The unit runs on its own hygrostat.')
+      const ex = this.recentExit(now)
+      return done('internal', ex && ex.reason ? ex.reason : 'The unit runs on its own hygrostat.')
     }
 
     const strat = controlStrategy(u)
@@ -340,6 +398,7 @@ class ExternalController {
     if (u.humidityRange) this.snapTarget(u)
     if (!u.connected) {
       this.inControl = false
+      this.confirmed = false
       return done('offline', 'The unit is not connected.')
     }
     if (now < this.retryAt) return done('error', 'A command failed; retrying shortly.')
@@ -347,6 +406,7 @@ class ExternalController {
     // Sensor loss: apply the fallback once, then wait for the sensor.
     if (hum.value === null) {
       this.inControl = false
+      this.confirmed = false
       if (!this.lossApplied) {
         if (cfg.onSensorLoss === 'off') {
           if (u.power && u.defrost) return done('sensor-missing', 'No fresh external humidity. Switching off after the defrost.')
@@ -362,24 +422,48 @@ class ExternalController {
     }
     this.lossApplied = false
 
-    // A change the controller did not make ends external control; the unit is left as it is.
-    if (this.inControl && now >= this.graceUntil) {
-      const powerChanged = this.expectedPower !== null && Boolean(u.power) !== this.expectedPower
-      if (powerChanged || !this.inControlMode(u)) {
-        this.exitExternal()
-        return done('internal', 'The unit was changed outside the controller, so external control was switched off. Pick the external mode again to resume.')
+    // Confirmation, then outside changes. Only a CONFIRMED state that changes
+    // ends external control; an unconfirmed reading (the unit catching up,
+    // or a stale one from before a restart) gets the command again instead.
+    if (this.inControl) {
+      if (this.confirmed) {
+        const powerChanged = this.expectedPower !== null && Boolean(u.power) !== this.expectedPower
+        if (powerChanged || !this.inControlMode(u)) {
+          const what = powerChanged
+            ? `power switched ${u.power ? 'on' : 'off'}`
+            : `mode changed to ${u.mode || '?'}${Number.isFinite(Number(u.targetHumidity)) ? ` ${u.targetHumidity} %` : ''}`
+          const reason = `The unit was changed outside the plugin (${what}), so External stopped. Pick External to resume.`
+          this.exitExternal(now, 'outside', reason)
+          return done('internal', reason)
+        }
+      } else if (now - this.lastCommandAt >= SETTLE_MS) {
+        if (this.matches(u)) {
+          this.confirmed = true
+          this.resends = 0
+        } else if (now - this.lastCommandAt >= RESEND_MS && !u.tankFull) {
+          if (!this.inControlMode(u)) commands.push(this.enterCommand(u))
+          if (this.expectedPower !== null && Boolean(u.power) !== this.expectedPower && !(this.expectedPower === false && u.defrost)) {
+            commands.push({ power: this.expectedPower })
+          }
+          this.resends++
+          this.commanded(now)
+        }
       }
     }
 
     // Take control: continuous mode (or the lowest target), remembering how the unit was set.
     if (!this.inControl) {
-      if (!this.inControlMode(u)) {
-        if (!this.saved) {
+      const resuming = this.resuming
+      this.resuming = false
+      if (!this.inControlMode(u) || resuming) {
+        if (!this.saved && !this.inControlMode(u)) {
           this.saved = { mode: u.mode, targetHumidity: u.targetHumidity }
           this.markDirty()
         }
+        // After a restart CO is sent even if the unit already reports it.
         commands.push(this.enterCommand(u))
-      } else if (!this.saved) {
+      }
+      if (!this.saved) {
         // Already in CO (e.g. after a restart): restore to the normal hygrostat later.
         const first = ((u.modes || []).find((m) => m.value !== 'continuous') || {}).value
         this.saved = { mode: first || u.mode, targetHumidity: 50 }
@@ -387,13 +471,14 @@ class ExternalController {
       }
       this.inControl = true
       this.expectedPower = Boolean(u.power)
-      this.graceUntil = now + GRACE_MS
+      this.commanded(now)
       // First take-over after a restart: put the unit back to the power the
-      // controller had chosen (a plugin stop may have restored the hygrostat).
+      // controller had chosen, always (a plugin stop may have restored the
+      // hygrostat, or the reading may predate that restore).
       if (this.resumePower !== null) {
         const want = this.resumePower
         this.resumePower = null
-        if (want !== Boolean(u.power) && !(want === false && u.defrost) && !u.tankFull) {
+        if (!(want === false && u.defrost) && !(want === true && u.tankFull)) {
           commands.push({ power: want })
           this.expectedPower = want
         }
@@ -422,10 +507,11 @@ class ExternalController {
       commands.push({ power: want })
       this.expectedPower = want
       this.lastSwitchAt = now
-      this.graceUntil = now + GRACE_MS
+      this.commanded(now)
       this.markDirty()
     }
 
+    if (!this.confirmed && this.resends >= 3) return done('error', `The unit has not taken the controller's command after ${this.resends} tries; sending it again.`)
     if (cold) return done('too-cold', `${round1(temp)} °C is below ${cfg.minTemperature} °C; the unit stays off.`)
     if (this.expectedPower) {
       if (u.defrost) return done('defrost', `Defrost in progress (humidity ${round1(h)}%, target ${target}%).`)
@@ -442,8 +528,9 @@ class ExternalController {
     return this.inControlMode(unit) || !unit.power ? [this.restoreCommand(unit, true)] : []
   }
 
-  publicStatus(unit) {
+  publicStatus(unit, now = Date.now()) {
     const strat = controlStrategy(unit || {})
+    const ex = this.mode === 'internal' ? this.recentExit(now) : null
     return {
       available: Boolean(strat.strategy),
       strategy: strat.strategy,
@@ -454,13 +541,18 @@ class ExternalController {
       sourceHumidity: this.last.humidity,
       sourceTemperature: this.config.temperaturePath ? this.last.temperature : null,
       hysteresisOn: this.config.hysteresisOn,
-      hysteresisOff: this.config.hysteresisOff
+      hysteresisOff: this.config.hysteresisOff,
+      confirmed: this.mode === 'external' ? this.confirmed : null,
+      lastExit: ex ? { at: ex.at, cause: ex.cause, reason: ex.reason } : null
     }
   }
 }
 
 module.exports = {
   DEFAULTS,
+  SETTLE_MS,
+  RESEND_MS,
+  LAST_EXIT_MS,
   ExternalController,
   normalizeControlConfig,
   controlStrategy,

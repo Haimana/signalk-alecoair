@@ -211,11 +211,15 @@ test('power changed on the unit: external control ends at once, the unit is left
   let r = h.tick()
   assert.deepEqual(r.commands, [], 'no restore, no command')
   assert.equal(r.status.state, 'internal')
-  assert.match(r.status.reason, /changed outside the controller/)
+  assert.match(r.status.reason, /changed outside the plugin \(power switched off\)/)
   assert.equal(h.ctl.mode, 'internal')
   assert.equal(h.ctl.saved, null)
   assert.equal(h.ctl.takeDirty(), true, 'persisted')
-  assert.deepEqual(h.ctl.persisted(), { mode: 'internal', target: 50, saved: null })
+  const exit = { at: new Date(h.now).toISOString(), cause: 'outside', reason: r.status.reason }
+  assert.deepEqual(h.ctl.persisted(), { mode: 'internal', target: 50, saved: null, lastExit: exit })
+  assert.deepEqual(h.ctl.publicStatus(h.unit, h.now).lastExit, exit)
+  h.advance(MIN); r = h.tick()
+  assert.equal(r.status.reason, exit.reason, 'the reason is not overwritten on the next tick')
   h.advance(90 * MIN); r = h.tick()
   assert.deepEqual(r.commands, [], 'it does not come back by itself')
   assert.equal(h.unit.power, false)
@@ -229,9 +233,11 @@ test('mode or target changed on the unit (leaving CO) also ends external control
   const h = harness({ minOnMinutes: 0 })
   h.ctl.enable(h.unit, 50)
   h.humidity(60); h.tick()
+  h.advance(MIN); h.tick() // the unit confirms CO
   h.advance(MIN)
   h.unit.mode = 'auto'; h.unit.targetHumidity = 45
   const r = h.tick()
+  assert.match(r.status.reason, /mode changed to auto 45 %/)
   assert.equal(r.status.state, 'internal')
   assert.deepEqual(r.commands, [])
   assert.equal(h.unit.targetHumidity, 45)
@@ -242,6 +248,7 @@ test('an external change during defrost also ends control; defrost never gets a 
   const h = harness({ minOnMinutes: 0 })
   h.ctl.enable(h.unit, 50)
   h.humidity(60); h.tick()
+  h.advance(MIN); h.tick() // confirmed
   h.unit.defrost = true
   h.advance(MIN); h.unit.mode = 'sleep'
   const r = h.tick()
@@ -305,7 +312,7 @@ test('restart: persisted external mode, target and saved settings are picked up;
   const h = harness({ minOnMinutes: 0 }, { mode: 'external', target: 55, saved: { mode: 'auto', targetHumidity: 50 } }, { mode: 'continuous', targetHumidity: 25, power: true })
   h.humidity(58)
   let r = h.tick()
-  assert.deepEqual(r.commands, [], 'already in CO and on; inside the band')
+  assert.deepEqual(r.commands, [{ mode: 'continuous' }], 'CO is sent again after a restart even though the unit reports it (no persisted power: power kept)')
   assert.equal(r.status.state, 'running')
   assert.equal(h.ctl.target, 55)
   h.ctl.disable()
@@ -435,6 +442,77 @@ test('restart: the controller\'s power choice and last switch time are persisted
 test('persisted state from an earlier draft without power: the unit\'s current power is kept', () => {
   const r = harness({}, { mode: 'external', target: 50, saved: { mode: 'auto', targetHumidity: 50 } }, { mode: 'continuous', targetHumidity: 25, power: true })
   r.humidity(50)
-  assert.deepEqual(r.tick().commands, [])
+  assert.deepEqual(r.tick().commands, [{ mode: 'continuous' }], 'CO again, power left as it is')
 })
 
+
+test('restart race: the first reading still shows the old CO/off, then the hand-back (Auto, on) arrives; External stays, CO and off are restored', () => {
+  const persisted = { mode: 'external', target: 50, saved: { mode: 'auto', targetHumidity: 50 }, power: false, lastSwitchAt: T0 - 30 * MIN }
+  const h = harness({ minOnMinutes: 10, minOffMinutes: 10 }, persisted, { mode: 'continuous', targetHumidity: 25, power: false })
+  h.humidity(50)
+  let r = h.tick()
+  assert.deepEqual(r.commands, [{ mode: 'continuous' }, { power: false }], 'always CO + the saved power on the first take-over')
+  // The stopping instance's hand-back lands after that: Auto 50, on.
+  h.unit.mode = 'auto'; h.unit.targetHumidity = 50; h.unit.power = true
+  h.advance(5000); r = h.tick()
+  assert.equal(h.ctl.mode, 'external', 'unconfirmed: no exit')
+  assert.deepEqual(r.commands, [])
+  h.advance(11000); r = h.tick()
+  assert.equal(h.ctl.mode, 'external', 'still unconfirmed after the settle time: no exit')
+  assert.deepEqual(r.commands, [])
+  h.advance(15000); r = h.tick()
+  assert.deepEqual(r.commands, [{ mode: 'continuous' }, { power: false }], 'sent again after RESEND_MS')
+  assert.equal(h.unit.mode, 'continuous'); assert.equal(h.unit.power, false)
+  h.advance(5000); h.tick()
+  assert.equal(h.ctl.confirmed, false, 'not before SETTLE_MS')
+  h.advance(11000); r = h.tick()
+  assert.equal(h.ctl.confirmed, true, 'confirmed once the unit reports CO/off after the settle time')
+  assert.equal(h.ctl.mode, 'external')
+  assert.equal(h.ctl.lastExit, null)
+  // From now on a real change on the unit ends External.
+  h.unit.power = true
+  h.advance(5000); r = h.tick()
+  assert.equal(h.ctl.mode, 'internal')
+  assert.equal(h.ctl.lastExit.cause, 'outside')
+})
+
+test('unconfirmed command: re-sent every 30 s, never taken as a manual change; error state after 3 tries', () => {
+  const h = harness({ minOnMinutes: 0, minOffMinutes: 0 })
+  h.ctl.enable(h.unit, 50)
+  h.humidity(60)
+  const at = (ms) => h.ctl.tick(h.now + ms, h.unit, { humidity: { path: 'x', value: 60, at: h.now + ms } })
+  assert.deepEqual(at(0).commands, [{ mode: 'continuous' }])
+  // The unit ignores it (stays Auto).
+  assert.deepEqual(at(20000).commands, [])
+  assert.deepEqual(at(31000).commands, [{ mode: 'continuous' }])
+  assert.deepEqual(at(62000).commands, [{ mode: 'continuous' }])
+  const r = at(93000)
+  assert.deepEqual(r.commands, [{ mode: 'continuous' }])
+  assert.equal(r.status.state, 'error')
+  assert.equal(h.ctl.mode, 'external')
+})
+
+test('last exit: kept across a restart, cleared by picking External or another mode, hidden after 12 h', () => {
+  const h = harness({ minOnMinutes: 0, minOffMinutes: 0 })
+  h.ctl.enable(h.unit, 50)
+  h.humidity(60); h.tick()
+  h.advance(MIN); h.tick()
+  h.unit.power = false
+  h.advance(MIN); h.tick()
+  const saved = JSON.parse(JSON.stringify(h.ctl.persisted()))
+  assert.equal(saved.lastExit.cause, 'outside')
+  const again = new ExternalController({ humidityPath: 'x' }, saved)
+  assert.deepEqual(again.publicStatus(h.unit, h.now).lastExit, saved.lastExit, 'still shown after a restart')
+  assert.equal(again.publicStatus(h.unit, h.now + 13 * 60 * MIN).lastExit, null, 'expires after 12 h')
+  again.enable(h.unit)
+  assert.equal(again.lastExit, null, 'External picked again')
+  const other = new ExternalController({ humidityPath: 'x' }, saved)
+  assert.equal(other.clearLastExit(), true, 'another mode picked')
+  assert.equal(other.persisted().lastExit, undefined)
+})
+
+test('config: onShutdown keep (default) or internal', () => {
+  assert.equal(normalizeControlConfig({}).onShutdown, 'keep')
+  assert.equal(normalizeControlConfig({ onShutdown: 'internal' }).onShutdown, 'internal')
+  assert.equal(normalizeControlConfig({ onShutdown: 'x' }).onShutdown, 'keep')
+})

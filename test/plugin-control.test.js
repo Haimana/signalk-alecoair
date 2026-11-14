@@ -33,10 +33,32 @@ function boot(dataRoot, sensors) {
   app.getSelfPath = (p) => sensors[p]
   app.streambundle = { getAvailablePaths: () => Object.keys(sensors).concat([`${PREFIX}.humidity`]) }
   const FakeLan = makeFakeLan()
-  const plugin = factory(app, { dataRoot, TuyaLanDevice: FakeLan, discovery: new DiscoveryService({ scan: async () => [] }) })
+  app.logs = []
+  const plugin = factory(app, { dataRoot, TuyaLanDevice: FakeLan, discovery: new DiscoveryService({ scan: async () => [] }), log: (m) => app.logs.push(m) })
   const router = fakeRouter()
   plugin.registerWithRouter(router)
   return { app, plugin, router, FakeLan }
+}
+
+/** Signal K's saved options for the plugin, as it writes them before stop(). */
+function writeSaved(dataRoot, options, enabled = true) {
+  fs.writeFileSync(path.join(dataRoot, 'signalk-alecoair.json'), JSON.stringify({ enabled, configuration: options }))
+}
+
+/** Shift Date.now forward (the controller's settle / resend times) while real timers run. */
+function fakeClock() {
+  const realNow = Date.now
+  let off = 0
+  Date.now = () => realNow() + off
+  return { advance(ms) { off += ms }, restore() { Date.now = realNow } }
+}
+
+async function until(fn, ms = 15000, step = 100) {
+  for (let t = 0; t < ms; t += step) {
+    if (await fn()) return true
+    await wait(step)
+  }
+  return false
 }
 
 const fresh = (value, source = 'OpenPlotter.I2C.BME280') => ({ value, $source: source, timestamp: new Date().toISOString() })
@@ -233,35 +255,169 @@ test('one sensor path may drive several units', async () => {
   await plugin.stop()
 })
 
-test('a change made on the unit ends external control in the plugin: mode internal persisted, no writes, menu shows the real mode', async () => {
+test('a change made on the unit ends external control in the plugin once confirmed: reason persisted and shown, logged, no writes', async () => {
   const { dataRoot, options } = install({ enabled: true, humidityPath: SENSOR, minOnMinutes: 0, minOffMinutes: 0 })
+  options.devices[0].pollSeconds = 5
   const sensors = { [SENSOR]: fresh(0.62) }
-  const { plugin, router, FakeLan } = boot(dataRoot, sensors)
+  const { app, plugin, router, FakeLan } = boot(dataRoot, sensors)
   await plugin.start(options)
   await wait(20)
   await router.call('POST', '/devices/:key/command', { params: { key: 'd13' }, body: { mode: 'external' } })
   const before = await router.call('GET', '/devices/:key/state', { params: { key: 'd13' } })
   assert.equal(before.body.control.mode, 'external')
-  const writes = FakeLan.writes.length
-  // The unit now reports Manual / 45 / on (changed with its buttons), past the grace time.
-  FakeLan.dps = { ...FakeLan.dps, 1: true, 2: 45, 5: 'Manual' }
-  const realNow = Date.now
-  Date.now = () => realNow() + 60000
+  assert.equal(before.body.control.confirmed, false, 'not confirmed right after the command')
+  FakeLan.dps = { ...FakeLan.dps, 1: true, 2: 25, 5: 'Manual' } // the unit took CO
+  const clock = fakeClock()
   try {
-    // Let the poll read the new DPs, then a control tick run.
-    await new Promise((r) => setTimeout(r, 5600))
+    clock.advance(20000)
+    const state = async () => (await router.call('GET', '/devices/:key/state', { params: { key: 'd13' } })).body
+    assert.ok(await until(async () => (await state()).control.confirmed === true), 'confirmed by the unit after the settle time')
+    const writes = FakeLan.writes.length
+    // The unit now reports Manual / 45 / on (changed with its buttons).
+    FakeLan.dps = { ...FakeLan.dps, 1: true, 2: 45, 5: 'Manual' }
+    clock.advance(60000)
+    assert.ok(await until(async () => (await state()).control.mode === 'internal'), 'External ends')
+    const st = await state()
+    assert.equal(st.mode, 'auto', 'menu shows the unit\'s real mode')
+    assert.equal(st.targetHumidity, 45)
+    assert.equal(st.control.lastExit.cause, 'outside')
+    assert.match(st.control.lastExit.reason, /changed outside the plugin \(mode changed to auto 45 %\)/)
+    assert.match(st.control.reason, /changed outside the plugin/, 'the reason stays on the next ticks')
+    assert.equal(FakeLan.writes.length, writes, 'nothing written to the unit')
+    const store = JSON.parse(fs.readFileSync(path.join(dataRoot, 'signalk-alecoair.store.json'), 'utf8'))
+    assert.equal(store.control.d13.mode, 'internal')
+    assert.equal(store.control.d13.lastExit.cause, 'outside', 'reason and time persisted')
+    assert.ok(app.logs.some((m) => /d13: External off: The unit was changed outside the plugin/.test(m)), 'logged')
+    // Picking a mode afterwards clears the note.
+    await router.call('POST', '/devices/:key/command', { params: { key: 'd13' }, body: { mode: 'auto' } })
+    assert.equal((await state()).control.lastExit, null)
+    await plugin.stop()
+    assert.equal(FakeLan.writes.length, writes + 1, 'plugin stop does not restore anything (only the mode picked above was written)')
   } finally {
-    Date.now = realNow
+    clock.restore()
+    await plugin.stop()
   }
-  const st = await router.call('GET', '/devices/:key/state', { params: { key: 'd13' } })
-  assert.equal(st.body.control.mode, 'internal')
-  assert.equal(st.body.mode, 'auto', 'menu shows the unit\'s real mode')
-  assert.equal(st.body.targetHumidity, 45)
-  assert.equal(FakeLan.writes.length, writes, 'nothing written to the unit')
-  const store = JSON.parse(fs.readFileSync(path.join(dataRoot, 'signalk-alecoair.store.json'), 'utf8'))
-  assert.equal(store.control.d13.mode, 'internal')
-  await plugin.stop()
-  assert.equal(FakeLan.writes.length, writes, 'plugin stop does not restore anything either')
+})
+
+test('restart race: the unit first reports the old CO/off, then the late hand-back (Auto, on): External stays, CO and off restored', async () => {
+  const { dataRoot, options } = install({ enabled: true, humidityPath: SENSOR, minOnMinutes: 0, minOffMinutes: 0 })
+  options.devices[0].pollSeconds = 5
+  const storeFile = path.join(dataRoot, 'signalk-alecoair.store.json')
+  const store = JSON.parse(fs.readFileSync(storeFile, 'utf8'))
+  store.control = { d13: { mode: 'external', target: 50, saved: { mode: 'auto', targetHumidity: 50 }, power: false, lastSwitchAt: Date.now() - 30 * 60000, stop: { at: new Date().toISOString(), reason: 'restart', handedBack: true } } }
+  fs.writeFileSync(storeFile, JSON.stringify(store))
+  const sensors = { [SENSOR]: fresh(0.49) } // inside the band: the controller keeps the unit off
+  const { app, plugin, router, FakeLan } = boot(dataRoot, sensors)
+  FakeLan.dps = { ...FakeLan.dps, 1: false, 2: 25, 5: 'Manual' } // stale: CO / off
+  const clock = fakeClock()
+  try {
+    await plugin.start(options)
+    assert.ok(await until(() => FakeLan.writes.length >= 2), 'first take-over')
+    assert.deepEqual(FakeLan.writes.slice(0, 2), [{ 2: 25, 5: 'Manual' }, { 1: false }], 'CO and the saved power are sent although the unit already reports them')
+    assert.ok(app.logs.some((m) => /resuming External after start/.test(m)))
+    // The stopping instance's hand-back lands now.
+    FakeLan.dps = { ...FakeLan.dps, 1: true, 2: 50, 5: 'Manual' }
+    FakeLan.prototype.setDps = async function setDps(d) { this.writes.push(d); FakeLan.writes.push(d); Object.assign(FakeLan.dps, d) }
+    const state = async () => (await router.call('GET', '/devices/:key/state', { params: { key: 'd13' } })).body
+    clock.advance(20000)
+    await wait(6000)
+    assert.equal((await state()).control.mode, 'external', 'an unconfirmed reading never ends External')
+    clock.advance(20000)
+    assert.ok(await until(() => FakeLan.writes.length >= 4), 'sent again')
+    assert.deepEqual(FakeLan.writes.slice(2, 4), [{ 2: 25, 5: 'Manual' }, { 1: false }])
+    clock.advance(20000)
+    assert.ok(await until(async () => (await state()).control.confirmed === true), 'confirmed')
+    const st = await state()
+    assert.equal(st.control.mode, 'external')
+    assert.equal(st.control.lastExit, null)
+    assert.equal(st.unitMode || st.mode, st.unitMode ? 'continuous' : 'external')
+    assert.equal(st.power, false)
+  } finally {
+    clock.restore()
+    await plugin.stop()
+  }
+})
+
+async function externalOn(over = {}) {
+  const { dataRoot, options } = install({ enabled: true, humidityPath: SENSOR, minOnMinutes: 0, ...over })
+  const sensors = { [SENSOR]: fresh(0.62) }
+  const b = boot(dataRoot, sensors)
+  await b.plugin.start(options)
+  await wait(20)
+  await b.router.call('POST', '/devices/:key/control', { params: { key: 'd13' }, body: { mode: 'external', target: 50 } })
+  return { ...b, dataRoot, options, writes: b.FakeLan.writes.length }
+}
+
+const HAND_BACK = { 1: true, 2: 50, 5: 'Manual' }
+const storedStop = (dataRoot) => JSON.parse(fs.readFileSync(path.join(dataRoot, 'signalk-alecoair.store.json'), 'utf8')).control.d13.stop
+
+test('stop hand-back decision: Admin save (restart) and Signal K shutdown keep the unit; disable, removed unit, External off in Admin hand it back', async () => {
+  // Admin save, still external on disk: no hand-back, recorded in the store.
+  let t = await externalOn()
+  writeSaved(t.dataRoot, t.options)
+  await t.plugin.stop({ reason: 'restart' })
+  assert.equal(t.FakeLan.writes.length, t.writes, 'restart: nothing written')
+  assert.deepEqual({ ...storedStop(t.dataRoot), at: 0 }, { at: 0, reason: 'restart', handedBack: false })
+  assert.equal(JSON.parse(fs.readFileSync(path.join(t.dataRoot, 'signalk-alecoair.store.json'), 'utf8')).control.d13.mode, 'external')
+  assert.ok(t.app.logs.some((m) => /stop \(restart\) with External on: unit kept/.test(m)))
+
+  // Signal K shutdown / restart (systemctl): kept by default.
+  t = await externalOn()
+  writeSaved(t.dataRoot, t.options)
+  await t.plugin.stop({ reason: 'shutdown' })
+  assert.equal(t.FakeLan.writes.length, t.writes, 'shutdown: nothing written')
+
+  // ... unless "When Signal K stops or restarts" is set to the own hygrostat.
+  t = await externalOn({ onShutdown: 'internal' })
+  writeSaved(t.dataRoot, t.options)
+  await t.plugin.stop({ reason: 'shutdown' })
+  assert.deepEqual(t.FakeLan.writes.at(-1), HAND_BACK, 'shutdown with onShutdown internal: hand-back')
+
+  // Plugin disabled.
+  t = await externalOn()
+  writeSaved(t.dataRoot, t.options, false)
+  await t.plugin.stop({ reason: 'disable' })
+  assert.deepEqual(t.FakeLan.writes.at(-1), HAND_BACK, 'disable: hand-back')
+  assert.equal(storedStop(t.dataRoot).handedBack, true)
+
+  // Admin save that removed the unit.
+  t = await externalOn()
+  writeSaved(t.dataRoot, { ...t.options, devices: [] })
+  await t.plugin.stop({ reason: 'restart' })
+  assert.deepEqual(t.FakeLan.writes.at(-1), HAND_BACK, 'unit removed: hand-back')
+
+  // Admin save that switched external control off for the unit.
+  t = await externalOn()
+  writeSaved(t.dataRoot, { ...t.options, devices: [{ ...t.options.devices[0], externalControl: { enabled: false, humidityPath: SENSOR } }] })
+  await t.plugin.stop({ reason: 'restart' })
+  assert.deepEqual(t.FakeLan.writes.at(-1), HAND_BACK, 'External off in Admin: hand-back')
+
+  // Older Signal K (no reason): the options on disk decide.
+  t = await externalOn()
+  writeSaved(t.dataRoot, t.options)
+  await t.plugin.stop()
+  assert.equal(t.FakeLan.writes.length, t.writes, 'no reason, still enabled on disk: kept')
+  t = await externalOn()
+  writeSaved(t.dataRoot, t.options, false)
+  await t.plugin.stop()
+  assert.deepEqual(t.FakeLan.writes.at(-1), HAND_BACK, 'no reason, disabled on disk: hand-back')
+})
+
+test('restart without hand-back: the next start resumes External with CO and the saved power, no Auto in between', async () => {
+  const t = await externalOn()
+  writeSaved(t.dataRoot, t.options)
+  await t.plugin.stop({ reason: 'restart' })
+  const second = boot(t.dataRoot, { [SENSOR]: fresh(0.62) })
+  second.FakeLan.dps = { ...second.FakeLan.dps, 1: true, 2: 25, 5: 'Manual' }
+  await second.plugin.start(t.options)
+  try {
+    assert.ok(await until(() => second.FakeLan.writes.length >= 2), 'take-over')
+    assert.deepEqual(second.FakeLan.writes.slice(0, 2), [{ 2: 25, 5: 'Manual' }, { 1: true }])
+    assert.ok(!second.FakeLan.writes.some((w) => w[2] === 50), 'never the hygrostat')
+    assert.ok(second.app.logs.some((m) => /was kept as it was at the last stop \(restart\)/.test(m)))
+  } finally {
+    await second.plugin.stop()
+  }
 })
 
 test('device state carries the external temperature in every mode while it is fresh', async () => {

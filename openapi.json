@@ -62,7 +62,7 @@
             }
           }
         },
-        "responses": { "200": { "description": "Device state with control: { configured, available, mode, target, state, reason, sourceHumidity, sourceTemperature, log }" }, "400": { "description": "Rejected (not set up, no sensor path, unit not controllable)" } }
+        "responses": { "200": { "description": "Device state with control: { configured, available, mode, target, state, reason, sourceHumidity, sourceTemperature, confirmed (external: the unit reported the last command), lastExit ({ at, cause, reason } while internal, after External stopped because the unit was changed outside the plugin, for 12 h), onShutdown, log }" }, "400": { "description": "Rejected (not set up, no sensor path, unit not controllable)" } }
       }
     },
     "/state": { "get": { "summary": "Deprecated alias: state of the first device", "responses": { "200": { "description": "Device state" } } } },

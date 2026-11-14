@@ -74,6 +74,17 @@ module.exports = function factory(app, injected = {}) {
   }
 
   /**
+   * External control on/off and stop decisions: always in the journal
+   * (stdout), not only with debug logging on, so an unexpected switch can be
+   * traced afterwards.
+   */
+  function info(msg) {
+    debug(msg)
+    if (deps.log) deps.log(msg)
+    else console.log(`signalk-alecoair: ${msg}`)
+  }
+
+  /**
    * Signal K Admin calls the setup routes even when the plugin is disabled or
    * unconfigured, i.e. before start() has run. Resolve the data root lazily
    * (same rule as start) so those routes never see a null path.
@@ -160,9 +171,14 @@ module.exports = function factory(app, injected = {}) {
       delete cmd.mode
       controlLog(entry, { request: { mode: leave.mode } })
       if (ctl.takeDirty()) saveControl(entry)
+      info(`${entry.cfg.key}: External off (mode ${leave.mode} picked)`)
       const ok = await sendControlCommands(entry, [leave], `mode ${leave.mode} picked`)
       publishControl(entry)
       if (!ok) throw new Error(`Could not set ${leave.mode} on the unit; see the plugin log.`)
+    }
+    else if (ctl && cmd.mode !== undefined && ctl.clearLastExit()) {
+      // A mode picked after External stopped: the stop note has been seen.
+      if (ctl.takeDirty()) saveControl(entry)
     }
     if (Object.keys(cmd).length) await entry.runtime.command(cmd)
     return publicDeviceState(entry)
@@ -222,6 +238,7 @@ module.exports = function factory(app, injected = {}) {
       temperaturePath: ext.temperaturePath || null,
       minTemperature: ext.minTemperature,
       onSensorLoss: ext.onSensorLoss,
+      onShutdown: ext.onShutdown,
       log: (entry.controlLog || []).slice(-20)
     }
   }
@@ -602,7 +619,12 @@ module.exports = function factory(app, injected = {}) {
       const ctl = entry.control
       const unit = entry.runtime.getPublicState()
       const before = ctl.status.state
+      const modeBefore = ctl.mode
+      const confirmedBefore = ctl.confirmed
       const { commands, status } = ctl.tick(Date.now(), unit, readings(entry))
+      if (modeBefore === 'external' && ctl.mode !== 'external') info(`${entry.cfg.key}: External off: ${status.reason}`)
+      if (status.state !== before && (status.state === 'sensor-missing' || before === 'sensor-missing' || status.state === 'error')) info(`${entry.cfg.key}: external control ${status.state}: ${status.reason}`)
+      if (!confirmedBefore && ctl.confirmed) debug(`${entry.cfg.key}: external control confirmed by the unit`)
       if (commands.length) await sendControlCommands(entry, commands, status.state)
       else if (status.state !== before) controlLog(entry, { state: status.state, reason: status.reason })
       if (ctl.takeDirty()) saveControl(entry)
@@ -632,8 +654,10 @@ module.exports = function factory(app, injected = {}) {
     // Wait for a running tick so the two never send at the same time.
     for (let i = 0; i < 50 && entry.controlBusy; i++) await new Promise((r) => setTimeout(r, 100))
     if (body.target !== undefined) entry.control.setTarget(body.target, unit)
+    const was = entry.control.mode
     if (mode === 'external') entry.control.enable(unit)
     else if (mode === 'internal') entry.control.disable()
+    if (mode && mode !== was) info(`${entry.cfg.key}: External ${mode === 'external' ? 'on' : 'off'} (requested${body.cause ? `: ${body.cause}` : ''})`)
     controlLog(entry, { request: { mode, target: body.target } })
     if (entry.control.takeDirty()) saveControl(entry)
     await runControl(entry)
@@ -715,7 +739,13 @@ module.exports = function factory(app, injected = {}) {
     if (!ext.enabled && !leftover) return
     entry.control = new ExternalController(ext, persisted || {})
     // External control switched off in Admin while it was on: give the unit its hygrostat back once.
-    if (!ext.enabled) entry.control.disable()
+    if (!ext.enabled) {
+      if (persisted.mode === 'external') info(`${entry.cfg.key}: External off (external control switched off in Admin): hygrostat restored`)
+      entry.control.disable()
+    } else if (persisted && persisted.mode === 'external') {
+      const how = persisted.stop ? `unit ${persisted.stop.handedBack ? 'was given its hygrostat back' : 'was kept as it was'} at the last stop (${persisted.stop.reason})` : 'no stop recorded (crash or power loss?)'
+      info(`${entry.cfg.key}: resuming External after start; ${how}; CO${typeof persisted.power === 'boolean' ? ` and power ${persisted.power ? 'on' : 'off'}` : ''} are sent again`)
+    }
     if (ext.enabled) {
       publishControlMeta(entry)
       registerControlPuts(entry)
@@ -724,12 +754,73 @@ module.exports = function factory(app, injected = {}) {
     if (entry.controlTimer.unref) entry.controlTimer.unref()
   }
 
-  async function stopControl(entry) {
+  /**
+   * The plugin's saved options as Signal K has them on disk right now
+   * (<dataRoot>/signalk-alecoair.json), or null when unreadable. Signal K
+   * writes this file before it calls stop() for an Admin save or a disable.
+   */
+  function readSavedOptions() {
+    try {
+      const raw = JSON.parse(fs.readFileSync(path.join(ensureDataRoot(), `${PLUGIN_ID}.json`), 'utf8'))
+      if (!raw || typeof raw !== 'object') return null
+      return { enabled: raw.enabled !== false, options: config.normalizeOptions(raw.configuration || {}) }
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Should stop() give this unit its own hygrostat back (the old behaviour) or
+   * leave it as the controller set it? Hand back when external control really
+   * ends; keep when the plugin only restarts and the next start resumes it.
+   *
+   * Signal K 2.x passes stop({ reason }): 'restart' (Admin save), 'disable'
+   * (plugin switched off), 'shutdown' (server stopping or restarting: systemctl
+   * stop/restart, Admin Restart, SIGTERM). Older servers pass nothing; then the
+   * saved options on disk decide.
+   * - reason 'disable', plugin disabled on disk, unit removed or disabled,
+   *   external control switched off in Admin → hand back;
+   * - reason 'restart' (Admin save, unit still external on disk) → keep;
+   * - reason 'shutdown' → the unit's "On Signal K shutdown" option: keep
+   *   (default, no Auto blip on a restart) or internal (hand back);
+   * - no reason: options on disk say still enabled and external → keep;
+   *   options unreadable → hand back (the safe old behaviour).
+   */
+  function stopDecision(entry, reason, saved) {
+    const key = entry.cfg.key
+    const ext = entry.cfg.externalControl || {}
+    if (!ext.enabled) return { handBack: true, why: 'external control off' }
+    if (reason === 'disable') return { handBack: true, why: 'plugin disabled' }
+    if (!saved) {
+      if (reason === 'restart') return { handBack: false, why: 'plugin restart' }
+      if (reason === 'shutdown') return ext.onShutdown === 'internal' ? { handBack: true, why: 'Signal K shutdown, set to hand back' } : { handBack: false, why: 'Signal K shutdown or restart' }
+      return { handBack: true, why: 'saved options unreadable' }
+    }
+    if (!saved.enabled) return { handBack: true, why: 'plugin disabled' }
+    const d = (saved.options.devices || []).find((x) => x.key === key)
+    if (!d) return { handBack: true, why: 'unit removed' }
+    if (d.enabled === false) return { handBack: true, why: 'unit disabled' }
+    if (!(d.externalControl && d.externalControl.enabled)) return { handBack: true, why: 'external control switched off in Admin' }
+    if (reason === 'shutdown') {
+      const keep = (d.externalControl.onShutdown || ext.onShutdown) !== 'internal'
+      return keep ? { handBack: false, why: 'Signal K shutdown or restart' } : { handBack: true, why: 'Signal K shutdown, set to hand back' }
+    }
+    return { handBack: false, why: reason === 'restart' ? 'plugin restart' : 'plugin restart (no stop reason; options on disk unchanged)' }
+  }
+
+  async function stopControl(entry, reason, saved) {
     if (entry.controlTimer) clearInterval(entry.controlTimer)
     entry.controlTimer = null
     if (!entry.control) return
     for (let i = 0; i < 30 && entry.controlBusy; i++) await new Promise((r) => setTimeout(r, 100))
-    const commands = entry.control.stopCommands(entry.runtime.getPublicState())
+    const ctl = entry.control
+    if (ctl.mode !== 'external') return
+    const decision = stopDecision(entry, reason, saved)
+    const commands = decision.handBack ? ctl.stopCommands(entry.runtime.getPublicState()) : []
+    info(`${entry.cfg.key}: stop (${reason || 'no reason given'}) with External on: ${decision.handBack ? `unit given its hygrostat back (${decision.why})` : `unit kept as the controller set it (${decision.why}); the next start resumes External`}`)
+    ensureStore()
+    store.control = { ...(store.control || {}), [entry.cfg.key]: { ...ctl.persisted(), stop: { at: new Date().toISOString(), reason: reason || 'unknown', handedBack: decision.handBack } } }
+    persistStore()
     if (!commands.length) return
     const timeout = new Promise((r) => { const t = setTimeout(r, 4000); if (t.unref) t.unref() })
     await Promise.race([sendControlCommands(entry, commands, 'plugin stop'), timeout])
@@ -966,12 +1057,14 @@ module.exports = function factory(app, injected = {}) {
     updateStatus()
   }
 
-  async function stop() {
+  async function stop(stopOptions) {
     running = false
     if (testSensorTimer) clearInterval(testSensorTimer)
     testSensorTimer = null
+    const reason = stopOptions && typeof stopOptions.reason === 'string' ? stopOptions.reason : null
     const all = [...devices.values()]
-    await Promise.all(all.map((e) => stopControl(e).catch(() => {})))
+    const saved = all.some((e) => e.control && e.control.mode === 'external') ? readSavedOptions() : null
+    await Promise.all(all.map((e) => stopControl(e, reason, saved).catch((err) => app.error(`${e.cfg.key}: stop: ${err.message || String(err)}`))))
     devices.clear()
     putPaths.clear()
     await Promise.all(all.map((e) => e.runtime.stop()))
@@ -1050,7 +1143,8 @@ module.exports = function factory(app, injected = {}) {
                   minOnMinutes: { type: 'number', title: 'Minimum on time (min)', default: 10 },
                   minOffMinutes: { type: 'number', title: 'Minimum off time (min)', default: 10 },
                   staleMinutes: { type: 'number', title: 'Sensor counts as lost after (min)', default: 5 },
-                  onSensorLoss: { type: 'string', title: 'When the sensor is lost', enum: ['internal', 'off'], default: 'internal' }
+                  onSensorLoss: { type: 'string', title: 'When the sensor is lost', enum: ['internal', 'off'], default: 'internal' },
+                  onShutdown: { type: 'string', title: 'When Signal K stops or restarts (keep = unit stays as set, resumed on start; internal = own hygrostat)', enum: ['keep', 'internal'], default: 'keep' }
                 }
               }
             }

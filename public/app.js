@@ -64,6 +64,15 @@ function show(el, visible) {
  * never moves anything. It fades; the last text stays during the fade-out.
  * Long text is cut with an ellipsis; the full text is in the tooltip.
  */
+/** 'External stopped at 10:33: the unit was changed outside the plugin (power switched off).' */
+function exitText(x) {
+  const d = new Date(x.at)
+  const hm = Number.isFinite(d.getTime()) ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '?'
+  const m = /changed outside the plugin( \([^)]*\))?/.exec(x.reason || '')
+  const why = x.cause === 'outside' ? `the unit was changed outside the plugin${m && m[1] ? m[1] : ''}` : (x.reason || x.cause || 'stopped')
+  return `External stopped at ${hm}: ${why}.`
+}
+
 function setMsg(el, text, kind) {
   const t = text || ''
   if (t) {
@@ -598,6 +607,7 @@ class DeviceView {
     else if (next.tankFull) setMsg(e.msg, 'Tank full. The unit has stopped.', 'alert')
     else if (next.defrost) setMsg(e.msg, 'Defrost. The compressor is paused.')
     else if (extOn && EXT_WARN.has(ctl.state)) setMsg(e.msg, `External sensor: ${extLabel.toLowerCase()}. ${ctl.reason || ''}`.trim())
+    else if (!extOn && ctl.lastExit) setMsg(e.msg, exitText(ctl.lastExit))
     else setMsg(e.msg, '')
 
     this.summary = { ...this.summary, name: next.name || this.summary.name, connected, power: on }
