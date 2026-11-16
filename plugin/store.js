@@ -8,6 +8,13 @@
  * File: <configPath>/plugin-config-data/signalk-alecoair.store.json (mode 0600).
  * The legacy signalk-alecoair-d13.store.json is read once and migrated; it
  * is left in place untouched as a backup.
+ *
+ * Writes are crash-safe: a temp file in the same directory is written and
+ * fsynced, the previous good store is kept as <store>.bak, the temp file is
+ * renamed over the store and the directory is fsynced. A store that cannot be
+ * parsed (for example empty after a power cut) is copied to
+ * <store>.corrupt-<timestamp>, the .bak is used instead, and a store that has
+ * local keys is never overwritten by one with none unless asked to.
  */
 
 const fs = require('fs')
@@ -42,6 +49,106 @@ function readJson(file) {
   } catch {
     return null
   }
+}
+
+function backupPath(file) {
+  return `${file}.bak`
+}
+
+/**
+ * Read a store file without ever hiding a problem:
+ * - `missing`: no file (ENOENT);
+ * - `ok`: a JSON object (`data`, `raw`);
+ * - `corrupt`: empty, not JSON, or not an object (`raw`, `error`);
+ * - `unreadable`: any other read error (EACCES, EIO, ...) (`error`).
+ */
+function readStoreFile(file) {
+  let raw
+  try {
+    raw = fs.readFileSync(file)
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return { status: 'missing' }
+    return { status: 'unreadable', error: err }
+  }
+  if (!raw.toString('utf8').trim()) return { status: 'corrupt', raw, error: new Error(`empty file (${raw.length} bytes)`) }
+  try {
+    const data = JSON.parse(raw.toString('utf8'))
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      return { status: 'corrupt', raw, error: new Error('not a JSON object') }
+    }
+    return { status: 'ok', data, raw }
+  } catch (err) {
+    return { status: 'corrupt', raw, error: new Error(`invalid JSON (${raw.length} bytes)`) }
+  }
+}
+
+/** Number of local keys a store holds (per-device entries and the account list). */
+function countKeys(s) {
+  if (!s || typeof s !== 'object') return 0
+  const ids = new Set()
+  for (const [id, entry] of Object.entries(s.devices || {})) if (entry && entry.localKey) ids.add(id)
+  for (const d of ((s.account && s.account.devices) || [])) if (d && d.id && d.localKey) ids.add(d.id)
+  return ids.size
+}
+
+/**
+ * Keep a copy of an unreadable store next to it as <store>.corrupt-<ts>.
+ * An identical copy that is already there is reused, so repeated reads of
+ * the same bad file do not pile up copies. Returns the copy's path.
+ */
+function preserveCorrupt(file, raw) {
+  const dir = path.dirname(file)
+  const base = path.basename(file)
+  try {
+    for (const name of fs.readdirSync(dir)) {
+      if (!name.startsWith(`${base}.corrupt-`)) continue
+      const other = path.join(dir, name)
+      try {
+        if (fs.readFileSync(other).equals(raw)) return other
+      } catch {
+        // unreadable copy: ignore it
+      }
+    }
+  } catch {
+    // directory listing failed: still try to write a copy
+  }
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const copy = `${file}.corrupt-${stamp}`
+  writeFileAtomic(copy, raw)
+  return copy
+}
+
+function fsyncDir(dir) {
+  let fd = null
+  try {
+    fd = fs.openSync(dir, 'r')
+    fs.fsyncSync(fd)
+  } catch {
+    // not supported everywhere (e.g. Windows): the file itself is fsynced
+  } finally {
+    if (fd !== null) try { fs.closeSync(fd) } catch {}
+  }
+}
+
+/** Write a file so that a crash leaves either the old or the new content, never a mix. */
+function writeFileAtomic(file, data) {
+  const dir = path.dirname(file)
+  const tmp = `${file}.${process.pid}.tmp`
+  try { fs.unlinkSync(tmp) } catch {}
+  const fd = fs.openSync(tmp, 'w', 0o600)
+  try {
+    fs.writeSync(fd, data)
+    fs.fsyncSync(fd)
+  } finally {
+    fs.closeSync(fd)
+  }
+  try {
+    fs.renameSync(tmp, file)
+  } catch (err) {
+    try { fs.unlinkSync(tmp) } catch {}
+    throw err
+  }
+  fsyncDir(dir)
 }
 
 function emptyStore() {
@@ -97,30 +204,81 @@ function migrateLegacyStore(raw = {}) {
   return store
 }
 
+function describe(file, read) {
+  return `${path.basename(file)}: ${read.status === 'unreadable' ? 'could not be read' : 'is damaged'} (${(read.error && (read.error.code || read.error.message)) || 'unknown error'})`
+}
+
 /**
  * Load the v2 store, migrating from the legacy file when the new one does
  * not exist yet. `legacyRaw` is the legacy file content (if any) so the
  * plugin options migration can use the adopted device it records.
+ *
+ * A damaged or unreadable store is never treated as "no store": `problem`
+ * then says what happened (`kind`, `message`, `corruptCopy`, `recoveredFrom`),
+ * a damaged file is copied to <store>.corrupt-<ts>, and the last good
+ * <store>.bak is used when there is one.
  */
 function loadStore(dataRoot) {
-  const current = readJson(storePath(dataRoot))
+  const file = storePath(dataRoot)
+  const read = readStoreFile(file)
   const legacyRaw = readJson(legacyStorePath(dataRoot))
-  if (current && typeof current === 'object') {
-    return { store: { ...emptyStore(), ...current }, migrated: false, legacyRaw }
+  if (read.status === 'ok') {
+    return { store: { ...emptyStore(), ...read.data }, migrated: false, legacyRaw, problem: null }
   }
-  if (legacyRaw && typeof legacyRaw === 'object') {
-    return { store: migrateLegacyStore(legacyRaw), migrated: true, legacyRaw }
+  if (read.status === 'missing') {
+    if (legacyRaw && typeof legacyRaw === 'object') {
+      return { store: migrateLegacyStore(legacyRaw), migrated: true, legacyRaw, problem: null }
+    }
+    return { store: emptyStore(), migrated: false, legacyRaw: null, problem: null }
   }
-  return { store: emptyStore(), migrated: false, legacyRaw: null }
+
+  const problem = { kind: read.status, file, message: describe(file, read), corruptCopy: null, recoveredFrom: null }
+  if (read.status === 'corrupt') {
+    try {
+      problem.corruptCopy = preserveCorrupt(file, read.raw)
+    } catch (err) {
+      problem.message += `; could not keep a copy (${err.code || err.message})`
+    }
+  }
+  const bak = readStoreFile(backupPath(file))
+  if (bak.status === 'ok') {
+    problem.recoveredFrom = backupPath(file)
+    problem.message += `. Using the last good copy ${path.basename(backupPath(file))} (${countKeys(bak.data)} local key(s)).`
+    return { store: { ...emptyStore(), ...bak.data }, migrated: false, legacyRaw, problem }
+  }
+  problem.message += problem.corruptCopy
+    ? `. No usable backup: local keys are missing until you sign in to AlecoAir again. The damaged file was kept as ${path.basename(problem.corruptCopy)}.`
+    : '. No usable backup: local keys are missing until the file can be read again.'
+  return { store: emptyStore(), migrated: false, legacyRaw, problem }
 }
 
-function saveStore(store, dataRoot) {
+/**
+ * Write the store. Crash-safe (see the header). Refuses, with an error:
+ * - to replace a store file that exists but cannot be read (EACCES, EIO, ...);
+ * - to replace a store that holds local keys with one that holds none,
+ *   unless `allowKeyLoss` is set (forgetting the account on purpose).
+ * A damaged store file is copied to <store>.corrupt-<ts> before it is replaced.
+ */
+function saveStore(store, dataRoot, { allowKeyLoss = false } = {}) {
   const file = storePath(dataRoot)
   const next = { ...store, storeVersion: STORE_VERSION, updatedAt: Date.now() }
   fs.mkdirSync(path.dirname(file), { recursive: true })
-  const tmp = `${file}.${process.pid}.tmp`
-  fs.writeFileSync(tmp, JSON.stringify(next, null, 2), { mode: 0o600 })
-  fs.renameSync(tmp, file)
+  const current = readStoreFile(file)
+  if (current.status === 'unreadable') {
+    throw new Error(`not saving: ${describe(file, current)}`)
+  }
+  if (current.status === 'ok' && !allowKeyLoss && countKeys(current.data) > 0 && countKeys(next) === 0) {
+    throw new Error(`not saving: ${path.basename(file)} holds ${countKeys(current.data)} local key(s) and the copy in memory holds none`)
+  }
+  if (current.status === 'corrupt') preserveCorrupt(file, current.raw)
+  if (current.status === 'ok') {
+    try {
+      writeFileAtomic(backupPath(file), current.raw)
+    } catch {
+      // a missing backup must not block saving the store itself
+    }
+  }
+  writeFileAtomic(file, JSON.stringify(next, null, 2))
   return next
 }
 
@@ -189,6 +347,9 @@ module.exports = {
   defaultDataRoot,
   storePath,
   legacyStorePath,
+  backupPath,
+  readStoreFile,
+  countKeys,
   emptyStore,
   migrateLegacyStore,
   loadStore,

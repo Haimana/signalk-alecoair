@@ -7,7 +7,7 @@ Signal K plugin and WebApp for AlecoAir Wi-Fi dehumidifiers over Tuya LAN: sever
 - **Setup only in Signal K Admin**, in the plugin's own configurator: **Apps & Plugins → Configuration → AlecoAir dehumidifiers**.
 - **The WebApp is for use only**: control and monitoring at `http://<signalk>:3000/signalk-alecoair/`.
 
-> Version 0.0.5, an early release: only the D13 Traditio has been verified on a real unit. Pure Node.js: no Python or other system packages.
+> Version 0.0.6, an early release: only the D13 Traditio has been verified on a real unit. Pure Node.js: no Python or other system packages.
 
 - **External sensor control** (optional, per unit): the plugin can drive a unit from another Signal K humidity sensor, with its own target, hysteresis and minimum on/off times. See [External sensor control](#external-sensor-control).
 
@@ -125,6 +125,7 @@ Each card shows the unit's real modes for its profile and only the controls the 
 - **Status:** text labels under the modes: **Compressor**, **Defrost**, **Tank full** (red when full) and, where the unit has them, **Sleep** and **Inside dry**. Bright = active, dim = inactive. **Child lock** and **Timer** are hidden by default; tick **Show child lock in UI** / **Show timer in UI** for a unit in Admin → Plugin Config → AlecoAir to show them. These checkboxes only change the WebApp: the Signal K paths and PUT handlers stay as they are. Child lock, timer, sleep and inside dry can be tapped; the timer opens a small − / + stepper.
 - **Message line:** under the status, one line per card for errors, an unreachable unit, a full tank, defrost or an external-sensor warning. It never moves the layout: one line on a desktop (the full text is in the tooltip), two lines on a phone. If the WebApp loses the plugin, a toast appears at the top of the page.
 - **Power** is the button at the top right of the card; the dot next to it is the LAN connection (white = connected, red = not answering).
+- **A unit off the network** (no power, off the Wi-Fi, rebooting) shows as not answering on its card; Signal K keeps running and the plugin tries again every 15 s. The Signal K log (`journalctl -u signalk`) gets one line when the connection is lost, with the error, and one when it is back, with how long it was away, e.g. `signalk-alecoair: d13: LAN connection back after 3 min 40 s offline`. No line per retry.
 - **Desktop:** the gauge is at the same place on every card, the modes are centred in the rest of the card, and the status line is level with the bottom of the gauge, so cards of different models line up. **Phone (< 760 px):** gauge, − / +, modes, fan, status and message are stacked and centred.
 
 Cards are built once and only updated on refresh (every 2 s), so nothing flickers. A tap shows at once; − / + and the arc send one command once the taps stop.
@@ -218,6 +219,7 @@ Manual defaults: Manual + hygrostat, CO = continuous via target `25`, restart th
 ## Security notes
 
 - Local keys are stored in plaintext in `~/.signalk/plugin-config-data/signalk-alecoair.store.json` (file mode 0600). They are never sent to the browser.
+- The store is written crash-safe (temp file, fsync, rename). The previous good copy is kept next to it as `signalk-alecoair.store.json.bak`, and a store that cannot be read is kept as `signalk-alecoair.store.json.corrupt-…`. Both hold the same local keys and have the same mode 0600. If the store is damaged, for example empty after a power cut, the plugin logs it, shows it in its Admin status and uses the `.bak`; with no usable `.bak` it shows a plugin error and the units need a new AlecoAir sign-in. A store with keys is never overwritten by one without them, except by **Forget account**.
 - The setup API (`/plugins/signalk-alecoair/setup/*`) is admin-only when Signal K security is on. The usage API needs read or read/write access.
 - The AlecoAir sign-in (`plugin/alecoair.js`) talks to the AlecoAir/Tuya cloud over HTTPS the way the phone app does, using the app's public Tuya client id. If the vendor rotates it, sign-in breaks; LAN control keeps working with the keys already stored. The password is MD5-hashed and RSA-encrypted with a per-login key from the cloud before it is sent, and it is never stored or logged.
 

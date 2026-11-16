@@ -7,7 +7,10 @@
  * and a phone viewport. They must not move.
  *
  * Uses a local Chrome/Chromium over the DevTools pipe (no npm dependency).
- * Skipped when no browser is found (set CHROME=/path/to/chrome to choose one).
+ * Skipped when no browser is found (set CHROME=/path/to/chrome to choose one),
+ * and when SIGNALK_REGISTRY_TEST=1: the Signal K plugin registry runs npm test
+ * under firejail, where launching a real Chrome hangs the suite until the
+ * registry's 240s cap kills it.
  */
 
 const { test } = require('node:test')
@@ -21,6 +24,9 @@ const { spawn } = require('child_process')
 const PUB = path.join(__dirname, '..', 'public')
 const CHROME = [process.env.CHROME, '/usr/bin/google-chrome-stable', '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].find((p) => p && fs.existsSync(p))
+const SKIP = process.env.SIGNALK_REGISTRY_TEST
+  ? 'skipped under SIGNALK_REGISTRY_TEST (registry firejail sandbox cannot drive Chrome)'
+  : (!CHROME && 'no Chrome/Chromium found')
 
 function units() {
   const base = {
@@ -94,8 +100,24 @@ function launch() {
   const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
     const msg = { id: ++id, method, params }
     if (sessionId) msg.sessionId = sessionId
-    waiting.set(msg.id, { resolve, reject })
-    out.write(JSON.stringify(msg) + '\0')
+    const timer = setTimeout(() => {
+      waiting.delete(msg.id)
+      reject(new Error(`Chrome DevTools timed out waiting for ${method}`))
+    }, 15000)
+    waiting.set(msg.id, {
+      resolve: (value) => { clearTimeout(timer); resolve(value) },
+      reject: (err) => { clearTimeout(timer); reject(err) }
+    })
+    try { out.write(JSON.stringify(msg) + '\0') } catch (err) {
+      clearTimeout(timer)
+      waiting.delete(msg.id)
+      reject(err)
+    }
+  })
+  proc.on('exit', (code, signal) => {
+    const err = new Error(`Chrome exited (${signal || code})`)
+    for (const { reject } of waiting.values()) reject(err)
+    waiting.clear()
   })
   const close = () => {
     try { proc.kill('SIGKILL') } catch {}
@@ -120,7 +142,7 @@ const MEASURE = `(() => {
   return JSON.stringify(out)
 })()`
 
-test('messages and the page banner never move the gauge, -/+, modes or status icons (desktop 1280 + 1024 and phone)', { skip: !CHROME && 'no Chrome/Chromium found', timeout: 90000 }, async () => {
+test('messages and the page banner never move the gauge, -/+, modes or status icons (desktop 1280 + 1024 and phone)', { skip: SKIP, timeout: 90000 }, async () => {
   const { st, server, port } = await fakeServer()
   const cdp = launch()
   try {
@@ -235,7 +257,7 @@ const BALANCE = `(() => {
   return JSON.stringify(out)
 })()`
 
-test('desktop: gauge at the same x on every card, modes centred in the rest, status labels centred under them', { skip: !CHROME && 'no Chrome/Chromium found', timeout: 90000 }, async () => {
+test('desktop: gauge at the same x on every card, modes centred in the rest, status labels centred under them', { skip: SKIP, timeout: 90000 }, async () => {
   const { st, server, port } = await fakeServer()
   const cdp = launch()
   try {
@@ -309,7 +331,7 @@ const TEMP = `(() => {
   }
   return JSON.stringify(out)
 })()`
-test('external temperature: under the current humidity in the gauge centre; moves nothing; a click there shows no focus ring (desktop and phone)', { skip: !CHROME && 'no Chrome/Chromium found', timeout: 90000 }, async () => {
+test('external temperature: under the current humidity in the gauge centre; moves nothing; a click there shows no focus ring (desktop and phone)', { skip: SKIP, timeout: 90000 }, async () => {
   const { st, server, port } = await fakeServer()
   const cdp = launch()
   try {

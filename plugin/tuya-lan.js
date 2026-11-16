@@ -20,6 +20,13 @@ class TuyaLanDevice {
       issueRefreshOnConnect: false
     })
     this.listeners = []
+    // tuyapi emits 'error' on every socket error, connect timeout and
+    // unparsable packet. An EventEmitter 'error' without a listener throws
+    // and takes the whole Signal K process down, so one listener stays
+    // attached for the life of this object, also during connect() and after
+    // disconnect().
+    this.errorHandler = null
+    this.device.on('error', (err) => { if (this.errorHandler) this.errorHandler(err) })
   }
 
   onData(handler) {
@@ -32,8 +39,7 @@ class TuyaLanDevice {
   }
 
   onError(handler) {
-    this.device.on('error', handler)
-    this.listeners.push(['error', handler])
+    this.errorHandler = handler
   }
 
   onDisconnect(handler) {
@@ -79,8 +85,12 @@ class TuyaLanDevice {
   }
 
   disconnect() {
+    this.errorHandler = null
     try {
       this.device.disconnect()
+      // tuyapi's disconnect() is a no-op before the handshake finished:
+      // close a half-open socket too.
+      if (this.device.client && !this.device.client.destroyed) this.device.client.destroy()
     } catch {
       // already closed
     }

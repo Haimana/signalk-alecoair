@@ -37,6 +37,13 @@ class DeviceRuntime extends EventEmitter {
     this.pollFails = 0
     this.reconnectTimer = null
     this.reconnecting = false
+    // LAN up/down tracking for the server log: one 'lan-lost' per outage
+    // (first failure only) and one 'lan-back' when the unit answers again.
+    this.everConnected = false
+    this.lanDownSince = null
+    this.lanDownError = null
+    this.lanDownLogged = false
+    this.pollFailSince = null
     this.lastHygrostat = 50
     this.simTickMs = 1000
     this.device = null
@@ -95,6 +102,51 @@ class DeviceRuntime extends EventEmitter {
     }
     this.commandEcho = null
     return applyDps(base, incoming, this.codec)
+  }
+
+  /** Error text for the server log: never the device id or the local key. */
+  lanErrorText(err) {
+    let text = String((err && err.message) || err || 'unknown error').replace(/\s+/g, ' ').trim()
+    for (const secret of [this.options.tuyaId, this.options.localKey]) {
+      if (secret && String(secret).length >= 4) text = text.split(String(secret)).join('…')
+    }
+    return text.length > 200 ? `${text.slice(0, 199)}…` : text
+  }
+
+  /** A connection attempt failed: emit 'lan-lost' once per outage. */
+  noteLanDown(err) {
+    if (!this.started || this.simulate) return
+    if (this.lanDownSince == null) this.lanDownSince = Date.now()
+    if (this.lanDownLogged) return
+    this.lanDownLogged = true
+    this.lanDownError = this.lanErrorText(err)
+    this.emit('lan-lost', {
+      error: this.lanDownError,
+      since: this.lanDownSince,
+      atStart: !this.everConnected,
+      retryMs: 15000
+    })
+  }
+
+  /** The unit answered: emit 'lan-back' if it had been away. */
+  noteLanUp() {
+    const since = this.lanDownSince
+    const wasLogged = this.lanDownLogged
+    const error = this.lanDownError
+    const atStart = !this.everConnected
+    this.everConnected = true
+    this.lanDownSince = null
+    this.lanDownError = null
+    this.lanDownLogged = false
+    this.pollFailSince = null
+    if (since == null) return
+    this.emit('lan-back', {
+      offlineMs: Math.max(0, Date.now() - since),
+      error,
+      // false: dropped and back on the first reconnect, no 'lan-lost' before
+      lostLogged: wasLogged,
+      atStart
+    })
   }
 
   getPublicState() {
@@ -178,15 +230,18 @@ class DeviceRuntime extends EventEmitter {
       this.bindDevice()
       this.noteReported(opened.dps)
       this.state = applyDps({ ...this.state, connected: true, lastError: null }, opened.dps, this.codec)
+      this.noteLanUp()
       this.emit('state', this.getPublicState())
     } catch (err) {
       this.state.connected = false
       this.state.lastError = err.message || String(err)
+      this.noteLanDown(err)
       this.emit('fault', err)
       this.emit('state', this.getPublicState())
       this.scheduleReconnect(15000)
     }
 
+    if (!this.started) return
     this.timers.push(setInterval(() => {
       this.poll().catch(() => {})
     }, this.pollMs))
@@ -198,12 +253,21 @@ class DeviceRuntime extends EventEmitter {
     try {
       const dps = await this.device.get()
       this.pollFails = 0
+      this.pollFailSince = null
       this.state = this.applyPolledDps(dps)
       this.emit('state', this.getPublicState())
     } catch (err) {
       this.pollFails += 1
+      if (this.pollFailSince == null) this.pollFailSince = Date.now()
       this.emit('warn', err)
-      if (this.pollFails >= 5) this.scheduleReconnect()
+      if (this.pollFails >= 5) {
+        // Offline since the first read of this failing run.
+        if (this.lanDownSince == null) {
+          this.lanDownSince = this.pollFailSince
+          this.lanDownError = this.lanErrorText(err)
+        }
+        this.scheduleReconnect()
+      }
     } finally {
       this.pollBusy = false
     }
@@ -266,6 +330,10 @@ class DeviceRuntime extends EventEmitter {
     this.device.onDisconnect(() => {
       if (this.reconnecting || !this.started) return
       this.state.connected = false
+      if (this.lanDownSince == null) {
+        this.lanDownSince = Date.now()
+        this.lanDownError = 'connection closed'
+      }
       this.scheduleReconnect()
     })
   }
@@ -296,16 +364,22 @@ class DeviceRuntime extends EventEmitter {
         }
       }
       const opened = await this.openLan(Lan)
+      if (!this.started) {
+        opened.device.disconnect()
+        return
+      }
       this.device = opened.device
       this.bindDevice()
       this.pollFails = 0
       this.noteReported(opened.dps)
       this.state = applyDps({ ...this.state, connected: true, lastError: null }, opened.dps, this.codec)
+      this.noteLanUp()
       this.emit('state', this.getPublicState())
     } catch (err) {
       failed = true
       this.state.connected = false
       this.state.lastError = err.message || String(err)
+      this.noteLanDown(err)
       this.emit('state', this.getPublicState())
     } finally {
       this.reconnecting = false

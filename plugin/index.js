@@ -45,12 +45,24 @@ function resolveDataRoot(app, override) {
   return storeLib.defaultDataRoot()
 }
 
+/** 75000 -> '1 min 15 s', 4000 -> '4 s', 3720000 -> '1 h 2 min'. */
+function formatDuration(ms) {
+  const total = Math.max(0, Math.round(Number(ms) / 1000) || 0)
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const sec = total % 60
+  if (h) return `${h} h ${m} min`
+  if (m) return `${m} min ${sec} s`
+  return `${sec} s`
+}
+
 module.exports = function factory(app, injected = {}) {
   const deps = injected || {}
   let options = config.normalizeOptions({})
   let store = storeLib.emptyStore()
   let dataRoot = null
   let storeLoaded = false
+  let storeProblem = null
   let discovery = null
   let migration = null
   const devices = new Map()
@@ -103,7 +115,9 @@ module.exports = function factory(app, injected = {}) {
     ensureDataRoot()
     if (storeLoaded) return store
     try {
-      store = storeLib.loadStore(dataRoot).store
+      const loaded = storeLib.loadStore(dataRoot)
+      store = loaded.store
+      noteStoreProblem(loaded.problem)
     } catch (err) {
       app.error(`AlecoAir: could not read the store: ${err.message}`)
     }
@@ -111,12 +125,32 @@ module.exports = function factory(app, injected = {}) {
     return store
   }
 
-  function persistStore() {
+  /**
+   * A damaged or unreadable store is logged and stays on the plugin status
+   * (as an error when no good copy was found) so it is never silent.
+   */
+  function noteStoreProblem(problem) {
+    if (!problem) return
+    storeProblem = { message: problem.message, recovered: Boolean(problem.recoveredFrom) }
+    app.error(`AlecoAir: store ${problem.message}`)
+    updateStatus()
+  }
+
+  function persistStore({ allowKeyLoss = false } = {}) {
     ensureStore()
     try {
-      store = storeLib.saveStore(store, dataRoot)
+      store = storeLib.saveStore(store, dataRoot, { allowKeyLoss })
+      // A new sign-in after a damaged store: the store is whole again.
+      if (storeProblem && !storeProblem.recovered && storeLib.countKeys(store) > 0) {
+        storeProblem = null
+        updateStatus()
+      }
     } catch (err) {
       app.error(`AlecoAir: could not write the store: ${err.message}`)
+      if (!storeProblem || storeProblem.recovered) {
+        storeProblem = { message: `could not be written (${err.message})`, recovered: false }
+        updateStatus()
+      }
     }
   }
 
@@ -360,7 +394,7 @@ module.exports = function factory(app, injected = {}) {
     router.post('/setup/unlink', (_req, res) => {
       ensureStore()
       storeLib.clearAccount(store, options.devices.map((d) => d.tuyaId).filter(Boolean))
-      persistStore()
+      persistStore({ allowKeyLoss: true })
       res.json({ ok: true, ...setupStatus() })
     })
 
@@ -915,8 +949,13 @@ module.exports = function factory(app, injected = {}) {
 
   function updateStatus() {
     if (typeof app.setPluginStatus !== 'function') return
+    if (storeProblem && !storeProblem.recovered && typeof app.setPluginError === 'function') {
+      app.setPluginError(`Store ${storeProblem.message}`)
+      return
+    }
+    const note = storeProblem ? `Store ${storeProblem.message} | ` : ''
     if (!options.devices.length) {
-      app.setPluginStatus('No device yet: sign in to AlecoAir and add one in this plugin\'s configuration.')
+      app.setPluginStatus(`${note}No device yet: sign in to AlecoAir and add one in this plugin's configuration.`)
       return
     }
     const parts = options.devices.map((d) => {
@@ -933,7 +972,7 @@ module.exports = function factory(app, injected = {}) {
       }
       return `${d.key}: ${s.power ? 'ON' : 'OFF'}${rh}${w}${ext}`
     })
-    app.setPluginStatus(parts.join(' | '))
+    app.setPluginStatus(note + parts.join(' | '))
   }
 
   function startDevice(cfg, noIpCount) {
@@ -996,6 +1035,19 @@ module.exports = function factory(app, injected = {}) {
       updateStatus()
     })
     runtime.on('warn', (err) => debug(`${cfg.key}: ${err.message || String(err)}`))
+    // LAN connection lost / back: one line each per outage, not per retry.
+    runtime.on('lan-lost', ({ error, atStart, retryMs }) => {
+      const every = Math.round((retryMs || 15000) / 1000)
+      info(atStart
+        ? `${cfg.key}: LAN connection failed at start (${error}); retrying every ${every} s, next line when it is back`
+        : `${cfg.key}: LAN connection lost (${error}); retrying every ${every} s, next line when it is back`)
+    })
+    runtime.on('lan-back', ({ offlineMs, error, lostLogged, atStart }) => {
+      const took = formatDuration(offlineMs)
+      if (!lostLogged) info(`${cfg.key}: LAN connection dropped (${error || 'connection closed'}) and was back after ${took}`)
+      else if (atStart) info(`${cfg.key}: LAN connection up after ${took} offline since start`)
+      else info(`${cfg.key}: LAN connection back after ${took} offline`)
+    })
     runtime.on('fault', (err) => {
       app.error(`${cfg.key}: ${err.message || String(err)}`)
     })
@@ -1047,6 +1099,10 @@ module.exports = function factory(app, injected = {}) {
     const loaded = storeLib.loadStore(dataRoot)
     store = loaded.store
     storeLoaded = true
+    storeProblem = null
+    noteStoreProblem(loaded.problem)
+    // Recovered from the .bak: write it back now (the damaged file is kept as .corrupt-*).
+    if (loaded.problem && loaded.problem.recoveredFrom) persistStore()
     if (loaded.migrated) {
       persistStore()
       debug(`Migrated ${storeLib.LEGACY_STORE_NAME} to ${storeLib.STORE_NAME}`)
@@ -1171,3 +1227,4 @@ module.exports = function factory(app, injected = {}) {
 }
 
 module.exports.resolveDataRoot = resolveDataRoot
+module.exports.formatDuration = formatDuration

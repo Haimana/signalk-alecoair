@@ -87,3 +87,99 @@ test('null, undefined or empty data roots fall back to the default instead of th
   assert.doesNotThrow(() => store.loadStore(null))
   assert.equal(typeof store.loadStore(null).store, 'object')
 })
+
+// H3 (0.0.6): crash-safe writes and recovery from a damaged store.
+
+const KEYED = () => {
+  const s = store.emptyStore()
+  store.setAccount(s, { devices: [{ id: 'bf1', name: 'D13', localKey: 'fake-key-1' }] })
+  return s
+}
+
+function siblings(dir) {
+  return fs.readdirSync(dir).sort()
+}
+
+test('saving keeps the previous good store as .bak (0600) and leaves no temp file', () => {
+  const dir = tmpDir()
+  const file = store.storePath(dir)
+  store.saveStore(KEYED(), dir)
+  assert.equal(fs.existsSync(store.backupPath(file)), false, 'no .bak before there was a previous store')
+  const first = fs.readFileSync(file, 'utf8')
+  const s = store.loadStore(dir).store
+  store.updateDevice(s, 'bf1', { protocol: '3.5' })
+  store.saveStore(s, dir)
+  assert.equal(fs.readFileSync(store.backupPath(file), 'utf8'), first)
+  assert.equal(store.loadStore(dir).store.devices.bf1.protocol, '3.5')
+  assert.deepEqual(siblings(dir).filter((n) => n.endsWith('.tmp')), [])
+  if (process.platform !== 'win32') assert.equal(fs.statSync(store.backupPath(file)).mode & 0o777, 0o600)
+})
+
+test('an empty store file (power cut) is reported, kept as .corrupt-*, and the .bak is used', () => {
+  const dir = tmpDir()
+  const file = store.storePath(dir)
+  store.saveStore(KEYED(), dir)
+  store.saveStore(store.loadStore(dir).store, dir) // now a .bak exists
+  fs.writeFileSync(file, '')
+  const loaded = store.loadStore(dir)
+  assert.ok(loaded.problem, 'problem reported')
+  assert.equal(loaded.problem.kind, 'corrupt')
+  assert.match(loaded.problem.message, /damaged/)
+  assert.equal(loaded.problem.recoveredFrom, store.backupPath(file))
+  assert.equal(store.getLocalKey(loaded.store, 'bf1'), 'fake-key-1', 'keys come back from the .bak')
+  assert.ok(loaded.problem.corruptCopy && fs.existsSync(loaded.problem.corruptCopy))
+  assert.equal(JSON.stringify(loaded.problem).includes('fake-key-1'), false, 'no key in the message')
+  // reading again does not pile up copies
+  store.loadStore(dir)
+  assert.equal(siblings(dir).filter((n) => n.includes('.corrupt-')).length, 1)
+  // the recovered store is saved; the good .bak is not replaced by the empty file
+  store.saveStore(loaded.store, dir)
+  assert.equal(store.getLocalKey(store.loadStore(dir).store, 'bf1'), 'fake-key-1')
+  assert.equal(store.getLocalKey(JSON.parse(fs.readFileSync(store.backupPath(file), 'utf8')), 'bf1'), 'fake-key-1')
+})
+
+test('a garbled store with no .bak: reported, copy kept, empty store, and saving later keeps the copy', () => {
+  const dir = tmpDir()
+  const file = store.storePath(dir)
+  fs.writeFileSync(file, '{"devices":{"bf1":{"localKey":"fake-k')
+  const loaded = store.loadStore(dir)
+  assert.equal(loaded.problem.kind, 'corrupt')
+  assert.equal(loaded.problem.recoveredFrom, null)
+  assert.match(loaded.problem.message, /No usable backup/)
+  assert.deepEqual(loaded.store.devices, {})
+  const copy = loaded.problem.corruptCopy
+  const bad = fs.readFileSync(copy, 'utf8')
+  store.saveStore(loaded.store, dir)
+  assert.equal(fs.readFileSync(copy, 'utf8'), bad, 'the damaged content is still there to recover by hand')
+  assert.equal(store.loadStore(dir).problem, null)
+})
+
+test('JSON that is not an object counts as damaged', () => {
+  for (const content of ['null', '[]', '42']) {
+    const dir = tmpDir()
+    fs.writeFileSync(store.storePath(dir), content)
+    assert.equal(store.loadStore(dir).problem.kind, 'corrupt', content)
+  }
+})
+
+test('an unreadable store is reported and never overwritten', () => {
+  const dir = tmpDir()
+  const file = store.storePath(dir)
+  fs.mkdirSync(file) // reading a directory fails with EISDIR, like EIO or EACCES would
+  const loaded = store.loadStore(dir)
+  assert.equal(loaded.problem.kind, 'unreadable')
+  assert.match(loaded.problem.message, /could not be read/)
+  assert.throws(() => store.saveStore(KEYED(), dir), /not saving/)
+  assert.ok(fs.statSync(file).isDirectory())
+})
+
+test('a store with keys is never replaced by one without, unless asked (forget account)', () => {
+  const dir = tmpDir()
+  store.saveStore(KEYED(), dir)
+  assert.throws(() => store.saveStore(store.emptyStore(), dir), /holds 1 local key\(s\) and the copy in memory holds none/)
+  assert.equal(store.getLocalKey(store.loadStore(dir).store, 'bf1'), 'fake-key-1')
+  const s = store.loadStore(dir).store
+  store.clearAccount(s, [])
+  store.saveStore(s, dir, { allowKeyLoss: true })
+  assert.equal(store.countKeys(store.loadStore(dir).store), 0)
+})
